@@ -1,0 +1,35 @@
+# vLLM backend adapter for the Khmer Document Parser SPA.
+#
+# Runs a small FastAPI sidecar that exposes the SPA's khparser API contract
+# (/parse-pdf, /ocr-image, /parse-table, /health) and translates each call to
+# the local vLLM OCR Flask app (surya-container-vllm). The SPA reaches this
+# adapter only when the in-app backend toggle is set to "vLLM" — nginx then
+# routes /api-vllm/* here (see nginx.conf). The default Modal path is untouched.
+#
+# This service joins the EXTERNAL network created by the surya-container-vllm
+# compose stack so it can reach `surya-container-vllm:8501` by name. That stack
+# must be up first (it normally is). It also publishes 8090 on the host so the
+# khmer-parser-ui container can reach it via host.docker.internal:8090.
+
+name: vllm-adapter
+
+services:
+  vllm-adapter:
+    build:
+      context: ./vllm-adapter
+      dockerfile: Dockerfile
+    image: vllm-adapter:latest
+    container_name: vllm-adapter
+    environment:
+      # Flask vLLM OCR app, reachable by container name on the surya network.
+      SURYA_FLASK_URL: ${SURYA_FLASK_URL:-http://surya-container-vllm:8501}
+    ports:
+      - "${VLLM_ADAPTER_PORT:-8090}:8090"
+    networks:
+      - surya
+    restart: unless-stopped
+
+networks:
+  surya:
+    external: true
+    name: surya-container-vllm_default

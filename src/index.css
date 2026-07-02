@@ -1,0 +1,245 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * ── Theme tokens ────────────────────────────────────────────────────────
+ * All palettes are CSS variables mapped to Tailwind colors in
+ * tailwind.config.js, so toggling `.dark` on <html> reskins the whole app.
+ *
+ *  slate  — themed neutral. Light = normal scale; dark = inverted (surfaces
+ *           darken, text lightens). Used by the shell and basic tabs.
+ *  ink    — used by older "dark panel" components with INVERTED semantics
+ *           (low index = light text, high index = dark surface). To make those
+ *           panels theme correctly we REVERSE the ink scale in light mode and
+ *           keep its natural order in dark mode. One definition fixes ~200
+ *           usages across 18 files without touching a single component.
+ *  accent — single brand accent (indigo/violet), slightly brighter in dark
+ *           for contrast. Used sparingly: focus rings, selection, active marks.
+ */
+:root {
+  --c-white: 255 255 255;
+  --c-slate-50: 248 250 252;
+  --c-slate-100: 241 245 249;
+  --c-slate-200: 226 232 240;
+  --c-slate-300: 203 213 225;
+  --c-slate-400: 148 163 184;
+  --c-slate-500: 100 116 139;
+  --c-slate-600: 71 85 105;
+  --c-slate-700: 51 65 85;
+  --c-slate-800: 30 41 59;
+  --c-slate-900: 15 23 42;
+  --c-slate-950: 2 6 23;
+
+  /* ink — reversed in light mode (so dark-panel components render light) */
+  --c-ink-50: 20 22 31;
+  --c-ink-100: 31 35 48;
+  --c-ink-200: 58 64 81;
+  --c-ink-300: 67 75 96;
+  --c-ink-400: 82 92 117;
+  --c-ink-500: 103 115 141;
+  --c-ink-600: 133 144 168;
+  --c-ink-700: 177 185 201;
+  --c-ink-800: 214 218 227;
+  --c-ink-900: 236 238 242;
+  --c-ink-950: 246 247 249;
+
+  --c-accent: 99 102 241;
+  --c-accent-hover: 79 70 229;
+  --c-accent-2: 16 185 129;      /* secondary (jade); used heavily only in dark */
+}
+
+.dark {
+  --c-white: 20 24 34;           /* card / panel surface (deeper for cyberpunk) */
+  --c-slate-50: 30 36 50;         /* subtle surface */
+  --c-slate-100: 38 45 62;        /* hover / inset surface */
+  --c-slate-200: 51 60 80;        /* borders */
+  --c-slate-300: 71 82 106;       /* stronger borders / dividers */
+  --c-slate-400: 128 140 167;     /* muted text */
+  --c-slate-500: 156 169 196;     /* secondary text */
+  --c-slate-600: 186 196 219;     /* primary-ish text */
+  --c-slate-700: 203 213 231;     /* near-heading text */
+  --c-slate-800: 226 232 240;     /* heading text */
+  --c-slate-900: 241 245 249;     /* strong heading text */
+  --c-slate-950: 248 250 252;     /* primary text */
+
+  /* ink natural order (dark panels stay dark) */
+  --c-ink-50: 246 247 249;
+  --c-ink-100: 236 238 242;
+  --c-ink-200: 214 218 227;
+  --c-ink-300: 177 185 201;
+  --c-ink-400: 133 144 168;
+  --c-ink-500: 103 115 141;
+  --c-ink-600: 82 92 117;
+  --c-ink-700: 67 75 96;
+  --c-ink-800: 58 64 81;
+  --c-ink-900: 31 35 48;
+  --c-ink-950: 20 22 31;
+
+  /* Cyberpunk accent: temple gold primary, jade secondary. */
+  --c-accent: 251 191 36;        /* gold #fbbf24 */
+  --c-accent-hover: 245 158 11;  /* amber-gold #f59e0b */
+  --c-accent-2: 52 211 153;      /* jade #34d399 */
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: #fbfbfc;
+    color: #020617;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+  .dark body {
+    /* Deep charcoal canvas with faint gold/jade aurora — cyberpunk, not garish. */
+    background:
+      radial-gradient(1100px 560px at 12% -12%, rgb(251 191 36 / 0.06), transparent 60%),
+      radial-gradient(1000px 520px at 100% 0%, rgb(52 211 153 / 0.05), transparent 55%),
+      #0a0b12;
+    background-attachment: fixed;
+    color: #e2e8f0;
+  }
+  /* Tighten display headings for a more refined hierarchy. */
+  h1, h2, h3 {
+    letter-spacing: -0.015em;
+  }
+  /* Consistent, accessible keyboard focus everywhere. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent) / 0.55);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Surfaces */
+  .card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+  .card-inset {
+    @apply rounded-xl border border-slate-200 bg-slate-50;
+  }
+
+  /* Buttons — shared base adds press feedback + accessible focus ring. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+           transition-all duration-150 active:scale-[0.98]
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-1 focus-visible:ring-offset-white
+           disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-slate-950 text-white shadow-sm hover:bg-slate-800;
+  }
+  .btn-secondary {
+    @apply btn border border-slate-200 bg-white text-slate-950 shadow-sm hover:bg-slate-50 hover:border-slate-300;
+  }
+  .btn-ghost {
+    @apply btn text-slate-600 hover:bg-slate-100 hover:text-slate-950;
+  }
+
+  /* Inputs — focus on the accent for a clear, branded affordance. */
+  .input {
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950
+           placeholder:text-slate-400 transition-colors
+           focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600;
+  }
+}
+
+/* Themed, refined scrollbars (Webkit + Firefox). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-slate-300)) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--c-slate-300)); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-slate-400)); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Branded text selection. */
+::selection { background: rgb(var(--c-accent) / 0.22); }
+
+/* Toast entrance animation */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.toast-in {
+  animation: toast-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Subtle rise-in for result panels / cards. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+/* ── Cyberpunk dark skin (gold + jade) ──────────────────────────────────────
+ * Scoped entirely to `.dark`, so the light theme is untouched. Reskins the
+ * shared component classes (.card/.btn/.input/.badge), the header, the active
+ * nav tab, scrollbars and selection — no per-component edits needed. */
+.dark .card {
+  background: color-mix(in srgb, rgb(var(--c-white)) 80%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  backdrop-filter: blur(14px) saturate(1.08);
+  border-color: rgb(var(--c-accent) / 0.16);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.03),
+    0 0 0 1px rgb(var(--c-accent-2) / 0.05),
+    0 16px 44px -22px rgb(0 0 0 / 0.8);
+}
+.dark .card-inset {
+  background: rgb(var(--c-slate-50) / 0.6);
+  border-color: rgb(var(--c-accent) / 0.10);
+}
+.dark .btn-primary {
+  background: linear-gradient(135deg, rgb(var(--c-accent)), rgb(var(--c-accent-hover)));
+  color: #0a0b12;
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.45), 0 8px 22px -8px rgb(var(--c-accent) / 0.5);
+}
+.dark .btn-primary:hover { filter: brightness(1.06); background: linear-gradient(135deg, rgb(var(--c-accent)), rgb(var(--c-accent-hover))); }
+.dark .btn-secondary:hover { border-color: rgb(var(--c-accent) / 0.4); }
+.dark .input:focus {
+  border-color: rgb(var(--c-accent));
+  box-shadow: 0 0 0 3px rgb(var(--c-accent) / 0.16);
+}
+.dark .chip { border-color: rgb(var(--c-accent) / 0.12); }
+
+/* Header: thin neon underglow */
+.dark header {
+  border-bottom-color: rgb(var(--c-accent) / 0.18);
+  box-shadow: 0 1px 0 rgb(var(--c-accent-2) / 0.10), 0 14px 34px -24px rgb(0 0 0 / 0.85);
+}
+
+/* Active nav tab glows gold (light mode keeps its slate styling) */
+.dark .nav-tab-active {
+  color: rgb(var(--c-accent)) !important;
+  border-color: rgb(var(--c-accent)) !important;
+  text-shadow: 0 0 16px rgb(var(--c-accent) / 0.45);
+}
+
+.dark ::selection { background: rgb(var(--c-accent) / 0.28); color: #0a0b12; }
+.dark * { scrollbar-color: rgb(var(--c-accent) / 0.5) transparent; }
+.dark ::-webkit-scrollbar-thumb {
+  background: linear-gradient(rgb(var(--c-accent) / 0.55), rgb(var(--c-accent-2) / 0.45));
+  background-clip: content-box;
+  border-radius: 8px;
+  border: 2px solid transparent;
+}

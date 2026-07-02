@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme palette as CSS variables. The `white` and `slate.*` Tailwind colors
+ * are mapped to these vars in tailwind.config.js, so toggling `.dark` on
+ * <html> swaps every `bg-white`, `text-slate-950`, `border-slate-200`, etc.
+ * across the whole app — no per-component theming needed.
+ *
+ * Light = the original slate values. Dark = inverted: surface "white" becomes
+ * a dark slate, text "slate-950" becomes near-white, borders soften, etc.
+ * Opacity modifiers (bg-white/90) keep working because the vars hold RGB
+ * triplets and Tailwind applies <alpha-value> on top.
+ */
+:root {
+  --c-white: 255 255 255;
+  --c-slate-50: 248 250 252;
+  --c-slate-100: 241 245 249;
+  --c-slate-200: 226 232 240;
+  --c-slate-300: 203 213 225;
+  --c-slate-400: 148 163 184;
+  --c-slate-500: 100 116 139;
+  --c-slate-600: 71 85 105;
+  --c-slate-700: 51 65 85;
+  --c-slate-800: 30 41 59;
+  --c-slate-900: 15 23 42;
+  --c-slate-950: 2 6 23;
+}
+
+.dark {
+  /* Dark theme: invert surfaces and text. "white" surfaces become dark,
+     "slate-950" text becomes light. Borders use a subtle light-on-dark. */
+  --c-white: 23 27 38;            /* card / panel surface */
+  --c-slate-50: 30 36 50;         /* subtle surface (was 248) */
+  --c-slate-100: 38 45 62;        /* hover / inset surface */
+  --c-slate-200: 51 60 80;        /* borders */
+  --c-slate-300: 71 82 106;       /* stronger borders / dividers */
+  --c-slate-400: 128 140 167;     /* muted text */
+  --c-slate-500: 156 169 196;     /* secondary text */
+  --c-slate-600: 186 196 219;     /* primary-ish text */
+  --c-slate-700: 203 213 231;     /* near-heading text */
+  --c-slate-800: 226 232 240;     /* heading text */
+  --c-slate-900: 241 245 249;     /* strong heading text */
+  --c-slate-950: 248 250 252;     /* primary text (was near-black) */
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    background: #fbfbfc;
+    color: #020617;
+  }
+  .dark body {
+    background: #14161f;
+    color: #e2e8f0;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-slate-950 text-white hover:bg-slate-800;
+  }
+  .btn-secondary {
+    @apply btn border border-slate-200 bg-white text-slate-950 shadow-sm hover:bg-slate-50;
+  }
+  .btn-ghost {
+    @apply btn text-slate-600 hover:bg-slate-100 hover:text-slate-950;
+  }
+  .input {
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #a3a3a3; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #737373; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Toast entrance animation */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.toast-in {
+  animation: toast-in 0.18s ease-out;
+}

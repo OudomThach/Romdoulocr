@@ -1,0 +1,39 @@
+# Keep the build context small and the cache layers effective.
+
+# Never send host node_modules / build output into the image — the Dockerfile
+# runs `npm ci` inside the builder stage.
+node_modules
+npm-debug.log*
+dist
+dist-ssr
+.cache
+.parcel-cache
+.vite
+
+# Local env / secrets.
+.env
+.env.local
+.env.*.local
+
+# VCS / editor / OS noise.
+.git
+.gitignore
+.gitattributes
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# Logs and tsbuildinfo from local dev.
+*.log
+*.tsbuildinfo
+
+# README/docs are fine to copy but we exclude them to keep the image tight.
+README.md
+
+# (Note: Dockerfile, nginx.conf, and docker-compose.yml MUST stay in the
+# build context — the Dockerfile copies nginx.conf into the image and
+# docker-compose references the Dockerfile. Do not exclude them.)

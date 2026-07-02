@@ -1,0 +1,56 @@
+# Convenience compose file: builds the image and runs the container.
+#
+# Both knobs default to the public Khmer Parser API; override at build time:
+#   API_UPSTREAM=https://your-api.example.com VITE_API_URL=/api docker compose build
+#
+# VITE_API_URL defaults to "/api" (relative), which routes through the
+# in-container nginx proxy. Set it to a full URL only if you've confirmed
+# that target sends proper Access-Control-Allow-Origin headers.
+#
+# --- Deploy workflow ------------------------------------------------------
+# The SPA is built INSIDE the image (the Dockerfile compiles it with Node, so
+# no local Node toolchain is required). To ship any source / nginx / Dockerfile
+# change, just rebuild and recreate:
+#
+#   docker compose up -d --build
+#
+# That's it — the container serves the freshly built dist baked into the image.
+# (There is intentionally NO ./dist bind mount: it used to shadow the image's
+# dist and required a fragile build -> docker cp -> up dance to refresh.)
+
+services:
+  khmer-parser-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        API_UPSTREAM: ${API_UPSTREAM:-https://rinabuoy13--khparser-api.modal.run}
+    image: khmer-parser-ui:latest
+    container_name: khmer-parser-ui
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:80"
+    # Join the adapter's network so nginx can reach the vLLM adapter by
+    # container name (vllm-adapter:8090) — no fragile host-port hop. `default`
+    # is kept so the service still has its own compose network.
+    networks:
+      - default
+      - surya
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  # The vLLM adapter (separate compose file) creates this; we attach to it so
+  # the SPA's nginx can resolve `vllm-adapter` over Docker's internal DNS.
+  surya:
+    external: true
+    name: surya-container-vllm_default
