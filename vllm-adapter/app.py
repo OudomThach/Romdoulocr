@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, File, Query, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from preprocess import preprocess_for_surya
@@ -39,6 +40,18 @@ FLASK_URL = os.environ.get("SURYA_FLASK_URL", "http://surya-container-vllm:8501"
 TIMEOUT = httpx.Timeout(connect=15.0, read=600.0, write=600.0, pool=600.0)
 
 app = FastAPI(title="khparser → vLLM adapter", version="1.0.0")
+
+# CORS: the hosted SPA (Netlify) calls this adapter DIRECTLY via a public
+# tunnel URL — a cross-origin request. Same-origin nginx proxying (the home
+# deployment) is unaffected. CORS is a browser gate, not auth; anyone with the
+# tunnel URL can curl regardless, so "*" costs nothing extra. If GPU abuse ever
+# shows up, add a shared-secret header check here.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # --------------------------------------------------------------------------- #

@@ -3,8 +3,11 @@
 # Differences vs the Docker/nginx deployment:
 #   - The /api reverse proxy is recreated with a Netlify redirect (the Modal
 #     upstream sends no CORS headers, so same-origin proxying is required).
-#   - VITE_VLLM_ENABLED=false hides the vLLM backend toggle: the local GPU
-#     stack is unreachable from the public internet. The Docker build keeps it.
+#   - The vLLM backend is reached DIRECTLY at a public Tailscale Funnel URL
+#     (VITE_VLLM_URL) instead of the nginx /api-vllm proxy: the adapter sends
+#     CORS headers, and a direct call avoids Netlify's ~26s proxy timeout,
+#     which long OCR inference would exceed. Requires the funnel to be up on
+#     the GPU machine: `tailscale funnel --bg 8090`.
 
 [build]
   command = "npm run build"
@@ -12,7 +15,7 @@
 
 [build.environment]
   NODE_VERSION = "22"
-  VITE_VLLM_ENABLED = "false"
+  VITE_VLLM_URL = "https://apt-server-desktop.tail806605.ts.net"
 
 # Same-origin proxy to the Khmer Parsing API (replaces nginx's /api location).
 [[redirects]]

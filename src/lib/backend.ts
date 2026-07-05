@@ -27,9 +27,12 @@ export const VLLM_ENABLED = import.meta.env.VITE_VLLM_ENABLED !== 'false';
 const STORAGE_KEY = 'ocr.backend';
 
 // Baked default base (e.g. "/api"). The vLLM base is a sibling path that nginx
-// routes to the adapter.
+// routes to the adapter — or, on hosted builds, an ABSOLUTE public tunnel URL
+// (VITE_VLLM_URL) that the browser calls directly (the adapter sends CORS
+// headers, and going direct dodges Netlify's ~26s proxy timeout, which long
+// OCR inference would exceed).
 const DEFAULT_BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '');
-const VLLM_BASE = '/api-vllm';
+const VLLM_BASE = (import.meta.env.VITE_VLLM_URL ?? '/api-vllm').replace(/\/$/, '');
 
 function read(): BackendId {
   if (!VLLM_ENABLED) return 'default'; // clamp stale localStorage on hosted builds
