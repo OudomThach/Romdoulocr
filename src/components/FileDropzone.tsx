@@ -7,11 +7,13 @@ export interface FileDropzoneProps {
   files: File[];
   onChange: (files: File[]) => void;
   disabled?: boolean;
+  /** Optional copy overrides (e.g. localized / image-only wording). */
+  labels?: { title?: string; replaceTitle?: string; hint?: string; accepted?: string };
 }
 
 const MIME_ACCEPT = '.pdf,application/pdf,image/png,image/jpeg,image/bmp,image/tiff,image/webp';
 
-export function FileDropzone({ multiple, accept, files, onChange, disabled }: FileDropzoneProps) {
+export function FileDropzone({ multiple, accept, files, onChange, disabled, labels }: FileDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [isOver, setIsOver] = useState(false);
@@ -95,12 +97,14 @@ export function FileDropzone({ multiple, accept, files, onChange, disabled }: Fi
         onDragLeave={() => setIsOver(false)}
         onDrop={onDrop}
         onClick={() => !disabled && inputRef.current?.click()}
+        data-over={isOver ? 'true' : undefined}
+        aria-disabled={disabled ? 'true' : undefined}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
           if ((e.key === 'Enter' || e.key === ' ') && !disabled) inputRef.current?.click();
         }}
-        className={`group relative flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-4 text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+        className={`dropzone group relative flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-4 text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
           disabled
             ? 'border-slate-200 bg-slate-50 opacity-60'
             : isOver
@@ -117,16 +121,18 @@ export function FileDropzone({ multiple, accept, files, onChange, disabled }: Fi
           className="sr-only"
           disabled={disabled}
         />
-        <div className="mb-3 grid h-11 w-11 place-items-center rounded-full bg-slate-100 text-slate-500 transition-all duration-200 group-hover:scale-110 group-hover:bg-accent/10 group-hover:text-accent">
+        <div className="dropzone-icon mb-3 grid h-11 w-11 place-items-center rounded-full bg-slate-100 text-slate-500 transition-all duration-200 group-hover:scale-110 group-hover:bg-accent/10 group-hover:text-accent">
           <UploadIcon className="h-5 w-5" />
         </div>
         <div className="text-sm font-semibold text-slate-950">
-          {files.length > 0 ? 'Add more or click to replace' : 'Drop a PDF or image here'}
+          {files.length > 0
+            ? labels?.replaceTitle ?? 'Add more or click to replace'
+            : labels?.title ?? 'Drop a PDF or image here'}
         </div>
-        <div className="mt-1 text-xs text-slate-500">or click to browse · paste an image anywhere</div>
+        <div className="mt-1 text-xs text-slate-500">{labels?.hint ?? 'or click to browse · paste an image anywhere'}</div>
       </div>
 
-      <div className="mt-2 text-[11px] text-slate-500">Accepted: {ACCEPTED_EXTENSIONS}</div>
+      <div className="mt-2 text-[11px] text-slate-500">{labels?.accepted ?? `Accepted: ${ACCEPTED_EXTENSIONS}`}</div>
 
       {error && (
         <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">

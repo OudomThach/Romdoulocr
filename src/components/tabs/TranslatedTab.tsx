@@ -396,6 +396,17 @@ export function TranslatedTab() {
         </div>
 
         {currentResult ? (
+          <div className="min-w-0">
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => batch.reset()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                title="Go back to your files — files and page selections are kept, so you can tweak settings and run again"
+              >
+                <span aria-hidden>↺</span> Back · run again
+              </button>
+            </div>
           <ExtractionResultsCard
             result={currentResult}
             currentPage={currentPage}
@@ -414,6 +425,7 @@ export function TranslatedTab() {
             targetLang={targetLang}
             tableCount={tableCount}
           />
+          </div>
         ) : (
           <FileReadyPanel
             files={prepared}
@@ -674,6 +686,7 @@ function ExtractionResultsCard({
   useEffect(() => {
     setEditedMarkdown(markdownSource);
   }, [markdownSource]);
+  const isEdited = editedMarkdown !== markdownSource;
 
   return (
     <section className="flex min-h-[720px] flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -775,11 +788,19 @@ function ExtractionResultsCard({
         )}
 
         <div className="flex items-center gap-2">
+          {isEdited && resultView === 'markdown' && (
+            <span
+              className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+              title="Copy and .md use your edited markdown. CSV/XLSX/Word exports rebuild from the original extraction."
+            >
+              edited
+            </span>
+          )}
           <button
             type="button"
             disabled={!result}
             onClick={() => {
-              if (resultView === 'markdown') void copyToClipboard(markdownMode === 'source' ? editedMarkdown : markdownSource);
+              if (resultView === 'markdown') void copyToClipboard(editedMarkdown);
               else if (resultView === 'csv') {
                 const csvTables = extractTableCells(result!);
                 void copyToClipboard(csvTables.map((t) => [t.headers, ...t.rows].map((r) => r.join(',')).join('\n')).join('\n\n'));
@@ -794,7 +815,7 @@ function ExtractionResultsCard({
             type="button"
             disabled={!result}
             onClick={() => {
-              if (resultView === 'markdown') downloadText(`${filenameBase}.md`, markdownSource, 'text/markdown;charset=utf-8');
+              if (resultView === 'markdown') downloadText(`${filenameBase}.md`, editedMarkdown, 'text/markdown;charset=utf-8');
               else if (resultView === 'csv') downloadDocumentCsvs(result!, filenameBase);
               else downloadDocumentMarkdown(result!, filenameBase);
             }}

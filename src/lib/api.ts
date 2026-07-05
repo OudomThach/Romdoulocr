@@ -38,13 +38,29 @@ export class AbortError extends Error {
   }
 }
 
+/** Hard ceiling for any single API call. Long OCR jobs run per-page (each page
+ * is its own request), so nothing legitimate should exceed this — beyond it,
+ * fail fast with a clear message instead of leaving the UI hanging. */
+const REQUEST_TIMEOUT_MS = 300_000;
+
 async function request<T>(
   path: string,
   init: RequestInit,
   signal?: AbortSignal,
   backend?: BackendId,
 ): Promise<T> {
-  const res = await fetch(`${baseUrlFor(backend ?? getBackend())}${path}`, { ...init, signal });
+  // If the caller didn't pass its own AbortSignal, apply the default timeout so
+  // a dead upstream can't hang the UI forever.
+  const effectiveSignal = signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrlFor(backend ?? getBackend())}${path}`, { ...init, signal: effectiveSignal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'TimeoutError') {
+      throw new ApiError(0, null, `Request timed out after ${REQUEST_TIMEOUT_MS / 60000} minutes`);
+    }
+    throw e;
+  }
   if (!res.ok) {
     let body: unknown = null;
     try {
@@ -104,7 +120,7 @@ export const api = {
    */
   parsePdf(
     files: File[],
-    opts: { detectLayout?: boolean; detectLines?: boolean } = {},
+    opts: { detectLayout?: boolean; detectLines?: boolean; useCtc?: boolean } = {},
     progress: UploadOptions = {},
   ): Promise<DocumentResult> {
     const fd = new FormData();
@@ -112,7 +128,8 @@ export const api = {
     const qs = new URLSearchParams();
     if (opts.detectLayout !== undefined) qs.set('detect_layout', String(opts.detectLayout));
     if (opts.detectLines !== undefined) qs.set('detect_lines', String(opts.detectLines));
-    qs.set('use_ctc', USE_CTC_DEFAULT);
+    // Default CTC on; callers (e.g. OCR Image tab's decoder toggle) can override.
+    qs.set('use_ctc', opts.useCtc === false ? 'false' : USE_CTC_DEFAULT);
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return uploadWithProgress<DocumentResult>(`/parse-pdf${suffix}`, fd, progress);
@@ -192,6 +209,12 @@ function uploadWithProgress<T>(
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${baseUrlFor(backend ?? getBackend())}${path}`);
+    // Fail fast instead of hanging: same ceiling as request().
+    xhr.timeout = REQUEST_TIMEOUT_MS;
+    xhr.addEventListener('timeout', () => {
+      signal?.removeEventListener('abort', onAbort);
+      reject(new ApiError(0, null, `Request timed out after ${REQUEST_TIMEOUT_MS / 60000} minutes`));
+    });
 
     if (onProgress) {
       xhr.upload.addEventListener('progress', (ev) => {

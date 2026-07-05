@@ -16,6 +16,14 @@
 
 export type BackendId = 'default' | 'vllm';
 
+/**
+ * Build-time switch: hosted builds (e.g. Netlify) set VITE_VLLM_ENABLED=false
+ * because the local GPU stack is unreachable from the public internet — the
+ * toggle would only ever show "offline" to guests. Unset / any other value =
+ * enabled, so Docker/home builds are unchanged.
+ */
+export const VLLM_ENABLED = import.meta.env.VITE_VLLM_ENABLED !== 'false';
+
 const STORAGE_KEY = 'ocr.backend';
 
 // Baked default base (e.g. "/api"). The vLLM base is a sibling path that nginx
@@ -24,6 +32,7 @@ const DEFAULT_BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
 const VLLM_BASE = '/api-vllm';
 
 function read(): BackendId {
+  if (!VLLM_ENABLED) return 'default'; // clamp stale localStorage on hosted builds
   try {
     return localStorage.getItem(STORAGE_KEY) === 'vllm' ? 'vllm' : 'default';
   } catch {
@@ -49,6 +58,7 @@ export function getBaseUrl(): string {
 }
 
 export function setBackend(next: BackendId): void {
+  if (next === 'vllm' && !VLLM_ENABLED) return;
   if (next === current) return;
   current = next;
   try {

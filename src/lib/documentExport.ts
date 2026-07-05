@@ -4,6 +4,27 @@ import { parsePipeTable, tableToCsvString } from '@/lib/tableExport';
 import { resultToMarkdown } from '@/lib/exporters';
 import { downloadZip, type ZipEntry } from '@/lib/zipExport';
 
+/** All region text joined per page, with `--- Page N ---` separators. */
+export function extractAllText(r: { pages: { page_number: number; regions: { text: string }[] }[] }): string {
+  return r.pages
+    .map((p) => `--- Page ${p.page_number} ---\n` + p.regions.map((rg) => rg.text).join('\n'))
+    .join('\n\n');
+}
+
+/**
+ * Preferred plain text for a document result. The API's `full_text` can arrive
+ * as an EMPTY STRING (not null) — plain `full_text ?? fallback` keeps that ""
+ * and hides all the region text (blank result panes / exports). Treat blank as
+ * missing and fall back to the joined region text.
+ */
+export function docText(r: {
+  full_text?: string | null;
+  pages?: { page_number: number; regions: { text: string }[] }[] | null;
+}): string {
+  if (r.full_text?.trim()) return r.full_text;
+  return r.pages ? extractAllText({ pages: r.pages }) : '';
+}
+
 export interface SheetData {
   name: string;
   headers: string[];

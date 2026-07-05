@@ -40,12 +40,15 @@ export function ShortcutsHelp() {
 
   return (
     <>
+      {/* Desktop-only: keyboard shortcuts mean nothing on touch, and the FAB
+          was covering the mobile bottom-nav's History item. Phones get the
+          settings gear in this corner instead (see App.tsx). */}
       <button
         type="button"
         onClick={() => setOpen(true)}
         title="Keyboard shortcuts (?)"
         aria-label="Keyboard shortcuts"
-        className="fixed bottom-4 right-4 z-30 grid h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white text-base font-bold text-slate-600 shadow-md transition-colors hover:bg-slate-50 hover:text-slate-950"
+        className="fixed bottom-4 right-4 z-30 hidden h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white text-base font-bold text-slate-600 shadow-md transition-colors hover:bg-slate-50 hover:text-slate-950 sm:grid"
       >
         ?
       </button>

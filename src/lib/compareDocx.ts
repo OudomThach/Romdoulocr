@@ -11,6 +11,7 @@
 // canvas + page rasterization; this module only assembles the docx.
 
 import { normalizeOcrResponse, type DocumentResult, type OcrImageResponse, type TableResult } from '@/types/api';
+import { docText } from '@/lib/documentExport';
 import { pageToMarkdown } from '@/lib/exporters';
 import { parsePipeTable } from '@/lib/tableExport';
 import { cer, pct, diffChars, type DiffToken } from '@/lib/textMetrics';
@@ -111,7 +112,8 @@ function regionCount(data?: CompareDocxPane['data']): number {
 
 function paneText(mode: CompareMode, data?: CompareDocxPane['data']): string {
   if (!data) return '';
-  if (mode === 'document') return (data as DocumentResult).full_text ?? '';
+  // Blank-aware: full_text can arrive as "" — fall back to region text.
+  if (mode === 'document') return docText(data as DocumentResult);
   if (mode === 'table') return (data as TableResult).structured_text ?? '';
   return normalizeOcrResponse(data).text ?? '';
 }

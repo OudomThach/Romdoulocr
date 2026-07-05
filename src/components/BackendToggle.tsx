@@ -3,7 +3,7 @@ import { useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useBackendsHealth } from '@/hooks/useHealth';
 import { toast } from '@/hooks/useToastStore';
 import type { HealthCheckResponse } from '@/types/api';
-import { getBackend, setBackend, subscribeBackend, type BackendId } from '@/lib/backend';
+import { getBackend, setBackend, subscribeBackend, VLLM_ENABLED, type BackendId } from '@/lib/backend';
 
 /**
  * Segmented control that switches the inference backend between the default
@@ -31,6 +31,10 @@ export function BackendToggle() {
   const backend = useSyncExternalStore(subscribeBackend, getBackend, () => 'default' as BackendId);
   const queryClient = useQueryClient();
   const health = useBackendsHealth();
+
+  // Hosted builds (VITE_VLLM_ENABLED=false) can't reach the local GPU stack —
+  // hide the whole toggle rather than show guests a permanently-dead option.
+  if (!VLLM_ENABLED) return null;
 
   const select = (id: BackendId) => {
     if (id === backend) return;

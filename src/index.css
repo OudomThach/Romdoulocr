@@ -44,9 +44,12 @@
   --c-ink-900: 236 238 242;
   --c-ink-950: 246 247 249;
 
-  --c-accent: 99 102 241;
-  --c-accent-hover: 79 70 229;
-  --c-accent-2: 16 185 129;      /* secondary (jade); used heavily only in dark */
+  /* Cyberpunk accent — electric cyan primary, hot magenta secondary, in BOTH
+   * themes. Light mode uses slightly deepened stops for contrast on the bright
+   * cyber canvas; dark mode goes full neon. */
+  --c-accent: 8 145 178;         /* cyan-600ish (readable on light) */
+  --c-accent-hover: 14 116 144;  /* cyan-700 */
+  --c-accent-2: 219 39 119;      /* magenta / pink-600 */
 }
 
 .dark {
@@ -76,10 +79,10 @@
   --c-ink-900: 31 35 48;
   --c-ink-950: 20 22 31;
 
-  /* Cyberpunk accent: temple gold primary, jade secondary. */
-  --c-accent: 251 191 36;        /* gold #fbbf24 */
-  --c-accent-hover: 245 158 11;  /* amber-gold #f59e0b */
-  --c-accent-2: 52 211 153;      /* jade #34d399 */
+  /* Cyberpunk accent: electric cyan primary, hot magenta secondary. */
+  --c-accent: 0 229 255;         /* neon cyan #00e5ff */
+  --c-accent-hover: 34 211 238;  /* cyan-400 #22d3ee */
+  --c-accent-2: 255 47 185;      /* neon magenta #ff2fb9 */
 }
 
 @layer base {
@@ -91,20 +94,67 @@
     -webkit-tap-highlight-color: transparent;
   }
   body {
-    background: #fbfbfc;
-    color: #020617;
+    /* Bright cyber canvas — cyan + magenta neon orbs over a cool near-white,
+     * the daytime version of the dark cyberpunk skin. */
+    background:
+      radial-gradient(460px 460px at 86% 8%, rgb(255 47 185 / 0.12), transparent 70%),
+      radial-gradient(400px 400px at 4% 60%, rgb(0 229 255 / 0.14), transparent 70%),
+      radial-gradient(900px 480px at 12% -10%, rgb(0 229 255 / 0.10), transparent 60%),
+      radial-gradient(800px 420px at 100% 0%, rgb(255 47 185 / 0.08), transparent 55%),
+      linear-gradient(180deg, #eef2fb 0%, #e7ecf7 100%);
+    background-attachment: fixed;
+    color: #0a0f1e;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     text-rendering: optimizeLegibility;
   }
   .dark body {
-    /* Deep charcoal canvas with faint gold/jade aurora — cyberpunk, not garish. */
+    /* Deep space canvas — cyan + magenta + violet neon glow over near-black. */
     background:
-      radial-gradient(1100px 560px at 12% -12%, rgb(251 191 36 / 0.06), transparent 60%),
-      radial-gradient(1000px 520px at 100% 0%, rgb(52 211 153 / 0.05), transparent 55%),
-      #0a0b12;
+      radial-gradient(60vw 50vh at 82% -5%, rgb(255 47 185 / 0.20), transparent 60%),
+      radial-gradient(55vw 45vh at 4% 8%, rgb(0 229 255 / 0.16), transparent 60%),
+      radial-gradient(40vw 40vh at 50% 120%, rgb(124 92 255 / 0.18), transparent 60%),
+      #05060b;
     background-attachment: fixed;
-    color: #e2e8f0;
+    color: #e6ebff;
   }
+
+  /* ── Cyber ambience layers (animated grid + scanline sweep) ──────────────
+   * Mounted once in App.tsx as fixed, non-interactive elements behind content.
+   * These are the "GIF" feel — pure CSS so they stay crisp. Motion is disabled
+   * under prefers-reduced-motion (see the media query lower in this file). */
+  .cyber-grid {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgb(var(--c-accent) / 0.14) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--c-accent) / 0.14) 1px, transparent 1px);
+    background-size: 46px 46px;
+    -webkit-mask-image: radial-gradient(circle at 50% 38%, #000 0%, transparent 78%);
+    mask-image: radial-gradient(circle at 50% 38%, #000 0%, transparent 78%);
+    animation: grid-pan 9s linear infinite;
+    opacity: 0.5;
+  }
+  html:not(.dark) .cyber-grid { opacity: 0.28; }
+  @keyframes grid-pan { to { background-position: 0 46px, 46px 0; } }
+  .cyber-scan {
+    position: fixed;
+    inset-inline: 0;
+    top: 0;
+    height: 42%;
+    z-index: 1;
+    pointer-events: none;
+    background: linear-gradient(180deg, transparent, rgb(var(--c-accent) / 0.08) 50%, transparent);
+    mix-blend-mode: screen;
+    opacity: 0.4;
+    animation: scan-sweep 7s linear infinite;
+  }
+  @keyframes scan-sweep { 0% { transform: translateY(-120%); } 100% { transform: translateY(320%); } }
+  /* Native form controls (checkboxes, radios, progress) follow the brand gold
+   * instead of the browser's default blue. */
+  :root { accent-color: rgb(var(--c-accent)); }
+  .dark { accent-color: rgb(0 229 255); }
   /* Tighten display headings for a more refined hierarchy. */
   h1, h2, h3 {
     letter-spacing: -0.015em;
@@ -117,9 +167,9 @@
 }
 
 @layer components {
-  /* Surfaces */
+  /* Surfaces — chunkier radii for a softer, more designed geometry. */
   .card {
-    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+    @apply rounded-[20px] border border-slate-200 bg-white shadow-sm;
   }
   .card-inset {
     @apply rounded-xl border border-slate-200 bg-slate-50;
@@ -127,13 +177,24 @@
 
   /* Buttons — shared base adds press feedback + accessible focus ring. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
            transition-all duration-150 active:scale-[0.98]
            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-1 focus-visible:ring-offset-white
            disabled:pointer-events-none disabled:opacity-50;
   }
+  /* Primary CTA = neon cyan→magenta gradient PILL in both themes (the signature).
+   * The gradient animates a subtle shine sweep. Dark text stays readable on the
+   * bright cyan end. */
   .btn-primary {
-    @apply btn bg-slate-950 text-white shadow-sm hover:bg-slate-800;
+    @apply btn rounded-full px-5 font-semibold text-slate-950 shadow-sm;
+    background: linear-gradient(135deg, #00e5ff, #ff2fb9);
+    background-size: 200% 100%;
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.35) inset, 0 8px 24px -8px rgb(255 47 185 / 0.55);
+    animation: btn-shine 3.5s linear infinite;
+  }
+  @keyframes btn-shine { to { background-position: 200% 0; } }
+  .btn-primary:hover {
+    filter: brightness(1.08);
   }
   .btn-secondary {
     @apply btn border border-slate-200 bg-white text-slate-950 shadow-sm hover:bg-slate-50 hover:border-slate-300;
@@ -155,6 +216,199 @@
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600;
   }
+
+  /* ── Surface elevation scale ──────────────────────────────────────────────
+   * The app used a single flat surface (border-slate-200 bg-white shadow-sm)
+   * for EVERYTHING, so dropzone / file-list / settings / results were visually
+   * indistinguishable. Three deliberate tiers now give real hierarchy:
+   *   .panel        — the default work surface (a hair softer than a raw card)
+   *   .panel-raised — the primary focal surface (dropzone, results); lifts more
+   *   .panel-sunken — a recessed inset (settings, secondary info)
+   * Each is reskinned per-theme lower in this file (light glass / dark glass). */
+  .panel {
+    @apply rounded-[20px] border border-slate-200 bg-white shadow-sm;
+  }
+  .panel-raised {
+    @apply rounded-[22px] border border-slate-200 bg-white;
+  }
+  .panel-sunken {
+    @apply rounded-2xl border border-slate-200 bg-slate-50;
+  }
+
+  /* Display headings — the type scale topped out at text-base, so nothing ever
+   * read as a title. `.display` establishes a real headline with brand tracking. */
+  .display {
+    @apply text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl;
+  }
+
+  /* Secondary CTA that finally uses the jade accent (was gold-only everywhere). */
+  .btn-jade {
+    @apply btn rounded-full px-5 font-semibold text-white shadow-sm;
+    background: linear-gradient(135deg, rgb(var(--c-accent-2)), rgb(var(--c-accent-2) / 0.82));
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.25) inset, 0 8px 20px -10px rgb(var(--c-accent-2) / 0.55);
+  }
+  .btn-jade:hover { filter: brightness(1.05); }
+
+  /* Sidebar nav row — icon + label, gold active state with a left indicator. */
+  .nav-item {
+    @apply relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
+           text-slate-500 transition-all duration-150
+           hover:bg-slate-100 hover:text-slate-950;
+  }
+  .nav-item-active {
+    @apply bg-slate-100 text-slate-950;
+  }
+}
+
+/* ── Light skin depth — the day version of the dark glass treatment. Scoped
+ * to html:not(.dark) so the cyberpunk dark skin below is untouched. ── */
+html:not(.dark) .card {
+  background: rgb(255 255 255 / 0.86);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  backdrop-filter: blur(10px) saturate(1.05);
+  border-color: rgb(2 6 23 / 0.07);
+  box-shadow: 0 1px 2px rgb(2 6 23 / 0.04), 0 14px 34px -24px rgb(2 6 23 / 0.22);
+}
+html:not(.dark) header {
+  box-shadow: 0 10px 30px -26px rgb(2 6 23 / 0.25);
+}
+
+/* ── Elevation surfaces — light glass skin (day version of the dark glass). ── */
+html:not(.dark) .panel,
+html:not(.dark) .panel-raised {
+  background: rgb(255 255 255 / 0.86);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  backdrop-filter: blur(10px) saturate(1.05);
+  border-color: rgb(2 6 23 / 0.07);
+}
+html:not(.dark) .panel {
+  box-shadow: 0 1px 2px rgb(2 6 23 / 0.04), 0 14px 34px -24px rgb(2 6 23 / 0.22);
+}
+/* The focal surface lifts noticeably more + carries a faint gold rim. */
+html:not(.dark) .panel-raised {
+  border-color: rgb(var(--c-accent) / 0.18);
+  box-shadow: 0 2px 4px rgb(2 6 23 / 0.05), 0 26px 60px -30px rgb(0 229 255 / 0.4);
+}
+html:not(.dark) .panel-sunken {
+  background: rgb(248 250 252 / 0.7);
+  border-color: rgb(2 6 23 / 0.06);
+  box-shadow: inset 0 1px 3px rgb(2 6 23 / 0.05);
+}
+
+.dark .panel {
+  background: color-mix(in srgb, rgb(var(--c-white)) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  backdrop-filter: blur(14px) saturate(1.08);
+  border-color: rgb(var(--c-accent) / 0.18);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.045), 0 18px 48px -22px rgb(0 0 0 / 0.85);
+}
+.dark .panel-raised {
+  background: color-mix(in srgb, rgb(var(--c-white)) 82%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+  backdrop-filter: blur(16px) saturate(1.1);
+  border-color: rgb(var(--c-accent) / 0.32);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    0 0 0 1px rgb(var(--c-accent-2) / 0.08),
+    0 26px 64px -26px rgb(0 0 0 / 0.9),
+    0 6px 30px -12px rgb(var(--c-accent) / 0.22);
+}
+.dark .panel-sunken {
+  background: rgb(var(--c-slate-50) / 0.55);
+  border-color: rgb(var(--c-accent) / 0.10);
+}
+
+/* ── Sidebar active nav row — gold→jade left indicator + brand tint. ── */
+.nav-item-active {
+  background: linear-gradient(90deg, rgb(var(--c-accent) / 0.14), rgb(var(--c-accent-2) / 0.06) 60%, transparent);
+}
+.nav-item-active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  height: 60%;
+  width: 3px;
+  transform: translateY(-50%);
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, rgb(var(--c-accent)), rgb(var(--c-accent-2)));
+  box-shadow: 0 0 12px rgb(var(--c-accent) / 0.6);
+}
+.nav-item-active .nav-icon { color: rgb(var(--c-accent)); }
+.dark .nav-item-active {
+  color: rgb(var(--c-accent)) !important;
+  text-shadow: 0 0 14px rgb(var(--c-accent) / 0.35);
+}
+
+/* ── Temple motif — a faint gold Angkor-tower ridge line used as a divider /
+ * watermark backing. Applied via .temple-ridge (a thin repeating skyline). ── */
+.temple-ridge {
+  height: 2px;
+  background:
+    repeating-linear-gradient(90deg,
+      rgb(var(--c-accent) / 0.35) 0 6px, transparent 6px 14px);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent);
+}
+
+/* Hero empty-state watermark glow behind the Angkor mark. */
+.hero-glow {
+  background:
+    radial-gradient(420px 300px at 50% 32%, rgb(var(--c-accent) / 0.14), transparent 70%),
+    radial-gradient(360px 260px at 50% 60%, rgb(var(--c-accent-2) / 0.08), transparent 70%);
+}
+
+/* The big tab panels are inline-styled `<section class="... bg-white">`, not
+ * `.card` — give them the same glass/depth treatment via one attribute-based
+ * rule so every panel app-wide floats (no per-component edits). */
+html:not(.dark) section.bg-white {
+  border-radius: 20px;
+  background: rgb(255 255 255 / 0.86);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  backdrop-filter: blur(10px) saturate(1.05);
+  border-color: rgb(2 6 23 / 0.07);
+  box-shadow: 0 1px 2px rgb(2 6 23 / 0.04), 0 14px 34px -24px rgb(2 6 23 / 0.22);
+}
+.dark section.bg-white {
+  border-radius: 20px;
+  background: color-mix(in srgb, rgb(var(--c-white)) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  backdrop-filter: blur(14px) saturate(1.08);
+  border-color: rgb(var(--c-accent) / 0.2);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    0 18px 48px -22px rgb(0 0 0 / 0.85),
+    0 4px 24px -12px rgb(var(--c-accent) / 0.12);
+}
+
+/* ── Dropzone glow-up (both themes) — gold-tinted dashed border with a soft
+ * interior halo, so the primary entry point looks inviting, not utilitarian. */
+html:not(.dark) .dropzone {
+  border-color: rgb(var(--c-accent) / 0.3);
+  background:
+    radial-gradient(340px 150px at 50% 0%, rgb(var(--c-accent) / 0.07), transparent 70%),
+    #ffffff;
+}
+.dark .dropzone {
+  border-color: rgb(var(--c-accent) / 0.35);
+  background:
+    radial-gradient(340px 150px at 50% 0%, rgb(var(--c-accent) / 0.10), transparent 70%),
+    rgb(var(--c-slate-50) / 0.45);
+}
+.dropzone:hover:not([aria-disabled='true']) {
+  box-shadow: 0 14px 40px -20px rgb(var(--c-accent) / 0.45);
+}
+/* Drag-over: brighten the gold rim + lift, so the drop target is unmistakable. */
+.dropzone[data-over='true'] {
+  border-color: rgb(var(--c-accent) / 0.7);
+  box-shadow: 0 18px 50px -18px rgb(var(--c-accent) / 0.55);
+}
+@keyframes drop-pulse {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-2px) scale(1.06); }
+}
+.dropzone[data-over='true'] .dropzone-icon {
+  animation: drop-pulse 1s ease-in-out infinite;
+  color: rgb(var(--c-accent));
 }
 
 /* Themed, refined scrollbars (Webkit + Firefox). */
@@ -196,25 +450,27 @@
  * shared component classes (.card/.btn/.input/.badge), the header, the active
  * nav tab, scrollbars and selection — no per-component edits needed. */
 .dark .card {
-  background: color-mix(in srgb, rgb(var(--c-white)) 80%, transparent);
+  background: color-mix(in srgb, rgb(var(--c-white)) 78%, transparent);
   -webkit-backdrop-filter: blur(14px) saturate(1.08);
   backdrop-filter: blur(14px) saturate(1.08);
-  border-color: rgb(var(--c-accent) / 0.16);
+  border-color: rgb(var(--c-accent) / 0.22);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.03),
-    0 0 0 1px rgb(var(--c-accent-2) / 0.05),
-    0 16px 44px -22px rgb(0 0 0 / 0.8);
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    0 0 0 1px rgb(var(--c-accent-2) / 0.06),
+    0 18px 48px -22px rgb(0 0 0 / 0.85),
+    0 4px 24px -12px rgb(var(--c-accent) / 0.12);
 }
 .dark .card-inset {
   background: rgb(var(--c-slate-50) / 0.6);
   border-color: rgb(var(--c-accent) / 0.10);
 }
 .dark .btn-primary {
-  background: linear-gradient(135deg, rgb(var(--c-accent)), rgb(var(--c-accent-hover)));
-  color: #0a0b12;
-  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.45), 0 8px 22px -8px rgb(var(--c-accent) / 0.5);
+  background: linear-gradient(135deg, rgb(var(--c-accent)), rgb(var(--c-accent-2)));
+  background-size: 200% 100%;
+  color: #02121a;
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.5), 0 8px 26px -6px rgb(var(--c-accent-2) / 0.55);
 }
-.dark .btn-primary:hover { filter: brightness(1.06); background: linear-gradient(135deg, rgb(var(--c-accent)), rgb(var(--c-accent-hover))); }
+.dark .btn-primary:hover { filter: brightness(1.1); }
 .dark .btn-secondary:hover { border-color: rgb(var(--c-accent) / 0.4); }
 .dark .input:focus {
   border-color: rgb(var(--c-accent));
@@ -242,4 +498,83 @@
   background-clip: content-box;
   border-radius: 8px;
   border: 2px solid transparent;
+}
+
+/* ══ HUD panel frames ═══════════════════════════════════════════════════════
+ * Replaces the generic rounded-box look on EVERY surface with an angular,
+ * clipped-corner "HUD" frame (top-left + bottom-right notched) and a neon edge.
+ * clip-path removes the soft drop shadow (it would be clipped away), so the
+ * edge is drawn with an INSET ring — which follows the diagonal cuts too,
+ * unlike a normal border. Appended last so it wins over the earlier per-theme
+ * .card / .panel / section.bg-white rules without needing to touch them.
+ * !important is deliberate: those earlier rules set border/radius/shadow that
+ * we must override in one place. */
+.card,
+.panel,
+.panel-raised,
+.panel-sunken,
+section.bg-white {
+  --hud-cut: 13px;
+  clip-path: polygon(
+    var(--hud-cut) 0, 100% 0,
+    100% calc(100% - var(--hud-cut)), calc(100% - var(--hud-cut)) 100%,
+    0 100%, 0 var(--hud-cut)
+  );
+  border-radius: 0 !important;
+  border: 0 !important;
+  box-shadow: inset 0 0 0 1px rgb(var(--c-accent) / 0.32) !important;
+}
+.dark .card,
+.dark .panel,
+.dark .panel-raised,
+.dark .panel-sunken,
+.dark section.bg-white {
+  box-shadow: inset 0 0 0 1px rgb(var(--c-accent) / 0.5) !important;
+}
+/* Focal surfaces (upload / results) — stronger edge + a faint magenta counter-glow. */
+.panel-raised,
+section.bg-white {
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--c-accent) / 0.5),
+    inset 0 0 22px -14px rgb(var(--c-accent-2) / 0.5) !important;
+}
+.dark .panel-raised,
+.dark section.bg-white {
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--c-accent) / 0.65),
+    inset 0 0 26px -12px rgb(var(--c-accent-2) / 0.55) !important;
+}
+
+/* Corner brackets on the focal panels — L-shaped neon marks on the two SQUARE
+ * corners (top-right, bottom-left); the other two are the angular cuts. Inset a
+ * few px so the parent clip-path doesn't shave them. */
+.panel-raised,
+section.bg-white {
+  position: relative;
+}
+.panel-raised::before,
+.panel-raised::after,
+section.bg-white::before,
+section.bg-white::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+  z-index: 2;
+  filter: drop-shadow(0 0 4px rgb(var(--c-accent) / 0.8));
+}
+.panel-raised::before,
+section.bg-white::before {
+  top: 7px;
+  right: 7px;
+  border-top: 2px solid rgb(var(--c-accent));
+  border-right: 2px solid rgb(var(--c-accent));
+}
+.panel-raised::after,
+section.bg-white::after {
+  bottom: 7px;
+  left: 7px;
+  border-bottom: 2px solid rgb(var(--c-accent));
+  border-left: 2px solid rgb(var(--c-accent));
 }

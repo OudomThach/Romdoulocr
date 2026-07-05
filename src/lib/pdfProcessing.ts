@@ -98,16 +98,23 @@ export async function renderPdfPages(
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas 2D context unavailable');
 
+      // White base BEFORE render: pdf.js leaves unpainted areas transparent,
+      // and transparent turns BLACK when encoded as JPEG below.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvasContext: ctx, viewport }).promise;
 
+      // JPEG q0.92 instead of PNG for the UPLOAD path: at 200–400 DPI a page
+      // PNG is 5–20 MB and upload time dominates; JPEG cuts bytes ~5–10× with
+      // no measurable OCR-quality impact at this quality level.
       const blob: Blob = await new Promise((resolve, reject) =>
-        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas.toBlob failed'))), 'image/png'),
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas.toBlob failed'))), 'image/jpeg', 0.92),
       );
-      const name = `${stripExt(file.name)}_p${pageNum}.png`;
+      const name = `${stripExt(file.name)}_p${pageNum}.jpg`;
       out.push({
         index: i,
         pageNumber: pageNum,
-        file: new File([blob], name, { type: 'image/png' }),
+        file: new File([blob], name, { type: 'image/jpeg' }),
         width: canvas.width,
         height: canvas.height,
       });

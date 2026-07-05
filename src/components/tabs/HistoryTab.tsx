@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useHistory } from '@/hooks/useHistory';
 import { downloadText } from '@/lib/utils';
+import { docText } from '@/lib/documentExport';
 import { resultToMarkdown } from '@/lib/exporters';
 import { normalizeOcrResponse, type DocumentResult, type OcrImageResponse, type TableResult } from '@/types/api';
 import type { CompareRecord, StoredRun, TabKind } from '@/lib/storage';
@@ -67,7 +68,7 @@ function summaryFor(run: StoredRun): string {
   }
   if (run.tab === 'compare') {
     const r = run.result as CompareRecord;
-    return `Compare · ${r.mode}${r.preferred ? ` · preferred: ${r.preferred === 'vllm' ? 'vLLM' : r.preferred === 'default' ? 'Cloud' : 'tie'}` : ''}`;
+    return `Compare · ${r.mode}${r.preferred ? ` · preferred: ${r.preferred === 'vllm' ? 'Surya OCR 2' : r.preferred === 'default' ? 'Khmer Parsing API' : 'tie'}` : ''}`;
   }
   return '';
 }
@@ -419,7 +420,7 @@ function RunDetails({
 function DocumentResultDetail({ result, run, onUpdate }: { result: DocumentResult; run: StoredRun; onUpdate: (patch: Partial<StoredRun>) => void }) {
   const [pageIdx, setPageIdx] = useState(0);
   const current = result.pages?.[pageIdx];
-  const fullText = result.full_text ?? extractAllText(result);
+  const fullText = docText(result);
   const perPageText = useMemo(
     () =>
       current
@@ -491,6 +492,8 @@ function DocumentResultDetail({ result, run, onUpdate }: { result: DocumentResul
 }
 
 function OcrResultDetail({ result, filename, run, onUpdate }: { result: OcrImageResponse; filename: string; run: StoredRun; onUpdate: (patch: Partial<StoredRun>) => void }) {
+  // Saved source-image thumbnail (added 2026-07-05); older runs are text-only.
+  const sourceImage = run.pagePreviews?.[1];
   return (
     <div className="grid gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -519,9 +522,19 @@ function OcrResultDetail({ result, filename, run, onUpdate }: { result: OcrImage
           </svg>
         </button>
       </div>
-      <pre className="max-h-96 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-sm whitespace-pre-wrap text-slate-700">
-        {result.text || <span className="italic text-slate-500">(no text)</span>}
-      </pre>
+      {sourceImage ? (
+        // Image + text side-by-side (stacked on phones), like the live OCR tab.
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)]">
+          <ZoomableImage imageUrl={sourceImage} alt={filename} minHeightClass="min-h-[280px]" enableKeyboard={false} />
+          <pre className="max-h-96 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-sm whitespace-pre-wrap text-slate-700">
+            {result.text || <span className="italic text-slate-500">(no text)</span>}
+          </pre>
+        </div>
+      ) : (
+        <pre className="max-h-96 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-sm whitespace-pre-wrap text-slate-700">
+          {result.text || <span className="italic text-slate-500">(no text)</span>}
+        </pre>
+      )}
     </div>
   );
 }
@@ -612,8 +625,3 @@ function TableResultDetail({ result, run, onUpdate }: { result: TableResult; run
   );
 }
 
-function extractAllText(r: { pages: { page_number: number; regions: { text: string }[] }[] }): string {
-  return r.pages
-    .map((p) => `--- Page ${p.page_number} ---\n` + p.regions.map((rg) => rg.text).join('\n'))
-    .join('\n\n');
-}

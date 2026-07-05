@@ -519,7 +519,11 @@ def _cells_from_table(result: dict[str, Any]) -> tuple[list[dict[str, Any]], int
 @app.post("/parse-table")
 async def parse_table(file: UploadFile = File(...), dpi: int | None = Query(None)) -> JSONResponse:
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        up = await _upload_preprocessed(client, file)
+        # do_deskew=False: table cell bboxes are drawn over the ORIGINAL page by
+        # the SPA (Compare docx cell boxes) — deskew rotates+expands the image,
+        # which would shift every cell box off the source page. Upscale/gray/
+        # sharpen are aspect-preserving and stay on.
+        up = await _upload_preprocessed(client, file, do_deskew=False)
         # Full-page OCR — surya-ocr-2 returns a real table as an HTML <table> WITH
         # text (the structure-only table_rec model returns EMPTY cell text, so we
         # don't use it here).

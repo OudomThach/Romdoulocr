@@ -77,7 +77,7 @@ const initialOcr = { useCtc: true, concurrency: 2 };
 const initialTable = { useCtc: true, rowTolerance: 20, concurrency: 2 };
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  activeTab: 'document',
+  activeTab: 'ocr',
   setActiveTab: (t) => set({ activeTab: t }),
 
   extraction: { highRes: true, fullPageOcr: true },
@@ -112,12 +112,15 @@ export const useSettingsStore = create<SettingsState>((set) => ({
           targetLang: s.targetLang ?? cur.translated.targetLang,
           detectLayout: s.detectLayout ?? cur.translated.detectLayout,
           detectLines: s.detectLines ?? cur.translated.detectLines,
-          useCtc: s.useCtc ?? cur.translated.useCtc,
+          // CTC stays ON even when replaying an old run saved with it off —
+          // the AR decoder repetition-loops on noisy Khmer; CTC is the product
+          // default everywhere. The toggle remains a manual, per-session opt-out.
+          useCtc: true,
           concurrency: s.concurrency ?? cur.translated.concurrency,
         };
       } else if (run.tab === 'ocr') {
         next.ocr = {
-          useCtc: s.useCtc ?? cur.ocr.useCtc,
+          useCtc: true,
           concurrency: s.concurrency ?? cur.ocr.concurrency,
         };
       } else if (run.tab === 'table') {

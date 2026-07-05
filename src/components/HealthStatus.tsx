@@ -41,6 +41,10 @@ export function HealthStatus() {
   }
 
   const ok = data.status === 'ok' && data.models_loaded;
+  // Live round-trip latency of the last health probe — a quick connection-
+  // speed indicator (green <500ms, amber beyond).
+  const ms = data.latencyMs;
+  const msLabel = ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
   return (
     <span
       className={`badge ${
@@ -48,10 +52,15 @@ export function HealthStatus() {
           ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
           : 'border-amber-200 bg-amber-50 text-amber-700'
       }`}
-      title={data.message ?? `${name} backend`}
+      title={`${data.message ?? `${name} backend`} · health round-trip ${msLabel}`}
     >
       <span className={`h-2 w-2 rounded-full ${ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />
       {ok ? `${name} ready` : `${name}: ${data.status}`}
+      {ok && ms !== undefined && (
+        <span className={`ml-1 hidden font-mono text-[10px] sm:inline ${ms < 500 ? 'text-emerald-600/70' : 'text-amber-600'}`}>
+          {msLabel}
+        </span>
+      )}
     </span>
   );
 }

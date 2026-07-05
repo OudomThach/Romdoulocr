@@ -1,0 +1,27 @@
+# Netlify config for the hosted (public, guest-facing) build.
+#
+# Differences vs the Docker/nginx deployment:
+#   - The /api reverse proxy is recreated with a Netlify redirect (the Modal
+#     upstream sends no CORS headers, so same-origin proxying is required).
+#   - VITE_VLLM_ENABLED=false hides the vLLM backend toggle: the local GPU
+#     stack is unreachable from the public internet. The Docker build keeps it.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  VITE_VLLM_ENABLED = "false"
+
+# Same-origin proxy to the Khmer Parsing API (replaces nginx's /api location).
+[[redirects]]
+  from = "/api/*"
+  to = "https://rinabuoy13--khparser-api.modal.run/:splat"
+  status = 200
+
+# SPA fallback — serve index.html for any unknown path.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

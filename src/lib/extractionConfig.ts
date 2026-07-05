@@ -49,6 +49,20 @@ export function rasterFor(highRes: boolean): RasterProfile {
  * (grayscale / contrast / sharpen / denoise / brightness); only the resolution
  * ceiling changes with the highRes toggle.
  */
+/**
+ * Minimal preprocessing (OCR Image tab): ONLY resolution normalization —
+ * upscale small images toward the target DPI — plus JPEG upload encoding.
+ * NO tonal or geometry edits (grayscale / contrast / sharpen / denoise /
+ * brightness / deskew / autoCrop): what you upload is what the engine reads.
+ * Rationale: adapter-side A/B testing showed aggressive tonal filters can
+ * CORRUPT clean text, and the silent edits confused users ("what did you do
+ * to my image?"). The document tabs keep the full pipeline for tilted scans.
+ */
+export function minimalPreprocessOpts(highRes: boolean): EnhanceOptions {
+  const { dpi, maxDimension } = rasterFor(highRes);
+  return { targetDpi: dpi, maxDimension, format: 'jpeg' };
+}
+
 export function preprocessOpts(highRes: boolean): EnhanceOptions {
   const { dpi, maxDimension } = rasterFor(highRes);
   return {
@@ -66,5 +80,9 @@ export function preprocessOpts(highRes: boolean): EnhanceOptions {
     // input); expose it as an opt-in toggle for users with shaded B/W scans.
     deskew: true,
     autoCrop: true,
+    // JPEG upload encoding: ~5-10× smaller than PNG at OCR-equivalent quality,
+    // which is the single biggest "connection speed" win (upload dominates on
+    // big scans). Display/format-conversion paths keep PNG.
+    format: 'jpeg',
   };
 }

@@ -21,13 +21,14 @@ import { mergeFullPageText } from '@/lib/mergeFullPage';
 import { ExtractionSettingsCard } from '@/components/ExtractionSettingsCard';
 import {
   countDocumentTables,
+  docText,
   documentHasText,
   downloadAllFormatsAsZip,
   downloadDocumentCsvs,
   downloadDocumentDocx,
   downloadDocumentHtml,
   downloadDocumentJson,
-  downloadDocumentMarkdown,
+
   downloadDocumentText,
   downloadDocumentXlsx,
   downloadSingleTableCsv,
@@ -268,7 +269,7 @@ export function DocumentParserTab() {
       const prep = prepared.find((p) => p.id === key);
       const base = sanitizeFilename(r.filename.replace(/\.[^.]+$/, ''));
       const dir = `${String(i + 1).padStart(2, '0')}_${base}`;
-      entries.push({ name: `${dir}/${base}.txt`, text: r.full_text ?? extractAllText(r) });
+      entries.push({ name: `${dir}/${base}.txt`, text: docText(r) });
       entries.push({ name: `${dir}/${base}.md`, text: resultToMarkdown(r) });
       entries.push({ name: `${dir}/${base}.json`, text: JSON.stringify(r, null, 2) });
       try {
@@ -366,7 +367,7 @@ export function DocumentParserTab() {
     }
   }, [effectivePagePreview, previewUrl]);
 
-  const cleanText = currentResult?.full_text ?? (currentResult ? extractAllText(currentResult) : '');
+  const cleanText = currentResult ? docText(currentResult) : '';
   const tableCount = currentResult ? countDocumentTables(currentResult) : 0;
 
   return (
@@ -397,6 +398,17 @@ export function DocumentParserTab() {
         </div>
 
         {currentResult ? (
+          <div className="min-w-0">
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => batch.reset()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                title="Go back to your files — files and page selections are kept, so you can tweak settings and run again"
+              >
+                <span aria-hidden>↺</span> Back · run again
+              </button>
+            </div>
           <ExtractionResultsCard
             result={currentResult}
             currentPage={currentPage}
@@ -409,6 +421,7 @@ export function DocumentParserTab() {
             markdownMode={markdownMode}
             onMarkdownModeChange={setMarkdownMode}
           />
+          </div>
         ) : (
           <FileReadyPanel
             files={prepared}
@@ -556,6 +569,15 @@ function ExtractionResultsCard({
   onMarkdownModeChange: (mode: MarkdownMode) => void;
 }) {
   const [editedMarkdown, setEditedMarkdown] = useState(markdownSource);
+
+  // Hero stats for the header chips — data as the hero, at a glance.
+  const heroStats = useMemo(() => {
+    if (!result) return null;
+    const regions = result.pages.reduce((s, p) => s + p.regions.length, 0);
+    const confs = result.pages.flatMap((p) => p.regions.map((r) => r.confidence));
+    const avg = confs.length ? confs.reduce((a, b) => a + b, 0) / confs.length : 0;
+    return { regions, avg };
+  }, [result]);
   // Markdown preview scope: 'page' keeps the rendered markdown locked to the
   // page currently shown in the image preview (so picking a page updates both
   // the picture and the text together); 'all' shows the whole document.
@@ -585,17 +607,13 @@ function ExtractionResultsCard({
     [result, currentPage],
   );
 
-  // Sync edited markdown when source changes (new result loaded)
+  // Sync edited markdown ONLY when a new result loads. Deliberately NOT on
+  // mode switches — resetting when re-entering Source mode wiped the user's
+  // edits (edit → Apply → Edit again lost everything).
   useEffect(() => {
     setEditedMarkdown(markdownSource);
   }, [markdownSource]);
-
-  // Sync edited markdown when switching to source mode
-  useEffect(() => {
-    if (markdownMode === 'source') {
-      setEditedMarkdown(markdownSource);
-    }
-  }, [markdownMode, markdownSource]);
+  const isEdited = editedMarkdown !== markdownSource;
 
   return (
     <section className="flex min-h-[720px] flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -605,6 +623,20 @@ function ExtractionResultsCard({
           <p className="truncate text-sm text-slate-500">
             {result?.filename ?? 'Upload a file, then extract selected pages'}
           </p>
+          {result && heroStats && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <HeroStat value={String(result.num_pages)} label={result.num_pages === 1 ? 'page' : 'pages'} />
+              <HeroStat value={String(heroStats.regions)} label="regions" />
+              {tableCount > 0 && <HeroStat value={String(tableCount)} label={tableCount === 1 ? 'table' : 'tables'} />}
+              {heroStats.avg > 0 && (
+                <HeroStat
+                  value={`${Math.round(heroStats.avg * 100)}%`}
+                  label="avg conf"
+                  tone={heroStats.avg >= 0.8 ? 'good' : 'warn'}
+                />
+              )}
+            </div>
+          )}
         </div>
         {result && exportTarget && (
           <div className="flex flex-wrap items-center gap-2">
@@ -739,12 +771,21 @@ function ExtractionResultsCard({
         )}
 
         <div className="flex items-center gap-2">
+          {isEdited && resultView === 'markdown' && (
+            <span
+              className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+              title="Copy and .md/.txt use your edited markdown. CSV/XLSX/Word/HTML exports rebuild from the original extraction."
+            >
+              edited
+            </span>
+          )}
           <button
             type="button"
             disabled={!result}
             onClick={() => {
               if (resultView === 'markdown') {
-                void copyToClipboard(markdownMode === 'source' ? editedMarkdown : markdownSource);
+                // Always the edited markdown — it's what the preview shows.
+                void copyToClipboard(editedMarkdown);
               } else if (resultView === 'csv') {
                 const csvTables = extractTableCells(result!);
                 const csvText = csvTables.map((t) => [t.headers, ...t.rows].map((r) => r.join(',')).join('\n')).join('\n\n');
@@ -762,7 +803,9 @@ function ExtractionResultsCard({
             type="button"
             disabled={!result}
             onClick={() => {
-              if (resultView === 'markdown') downloadDocumentMarkdown(result!, filenameBase);
+              // .md download honors the user's edits (round-trip fix); CSV and
+              // page-text paths are unedited structured/derived data.
+              if (resultView === 'markdown') downloadText(`${filenameBase}.md`, editedMarkdown, 'text/markdown;charset=utf-8');
               else if (resultView === 'csv') downloadDocumentCsvs(result!, filenameBase);
               else downloadText(`${filenameBase}-page-${pageIndex + 1}.txt`, pageText);
             }}
@@ -1046,10 +1089,15 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-z0-9._-]+/gi, '_').slice(0, 80);
 }
 
-function extractAllText(r: { pages: { page_number: number; regions: { text: string }[] }[] }): string {
-  return r.pages
-    .map((p) => `--- Page ${p.page_number} ---\n` + p.regions.map((rg) => rg.text).join('\n'))
-    .join('\n\n');
+/** Compact "big number" chip — value first, tiny label after (data as hero). */
+function HeroStat({ value, label, tone }: { value: string; label: string; tone?: 'good' | 'warn' }) {
+  const toneCls = tone === 'good' ? 'text-emerald-600' : tone === 'warn' ? 'text-amber-600' : 'text-slate-950';
+  return (
+    <span className="inline-flex items-baseline gap-1 rounded-full border border-slate-200 bg-white/70 px-2.5 py-1">
+      <span className={`text-sm font-semibold leading-none ${toneCls}`}>{value}</span>
+      <span className="text-[9px] font-medium uppercase tracking-wider text-slate-500">{label}</span>
+    </span>
+  );
 }
 
 function pageToPlainText(page: PageResult): string {

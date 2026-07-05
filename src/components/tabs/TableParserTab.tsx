@@ -12,6 +12,8 @@ import { useHistoryAutoSave } from '@/hooks/useHistoryAutoSave';
 import { usePdfPageSelection } from '@/hooks/usePdfPageSelection';
 import { api } from '@/lib/api';
 import { tableToCsv } from '@/lib/exporters';
+import { parsePipeTable, tableToCsvString } from '@/lib/tableExport';
+import { exportSingleTableToXlsx } from '@/lib/documentExport';
 import { copyToClipboard, downloadBytes, downloadJson, downloadText, isPdf } from '@/lib/utils';
 import { getPdfPageCount, renderPdfPages } from '@/lib/pdfProcessing';
 import { processImage } from '@/lib/imageProcessing';
@@ -254,6 +256,17 @@ export function TableParserTab() {
         </div>
 
         {currentResult ? (
+          <div className="min-w-0">
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => batch.reset()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                title="Go back to your files — files and page selections are kept, so you can tweak settings and run again"
+              >
+                <span aria-hidden>↺</span> Back · run again
+              </button>
+            </div>
           <TableExtractionResultsCard
             result={currentResult}
             uploadPreviewUrl={uploadPreviewUrl}
@@ -264,6 +277,7 @@ export function TableParserTab() {
             onMarkdownModeChange={setMarkdownMode}
             filenameBase={filenameBase}
           />
+          </div>
         ) : (
           <FileReadyPanel
             files={prepared}
@@ -463,15 +477,18 @@ function TableExtractionResultsCard({
 }) {
   const [editedMarkdown, setEditedMarkdown] = useState(markdownSource);
 
+  // Reset ONLY when a new result loads — resetting on mode switches wiped the
+  // user's edits (edit → Apply → Edit again lost everything).
   useEffect(() => {
     setEditedMarkdown(markdownSource);
   }, [markdownSource]);
-
-  useEffect(() => {
-    if (markdownMode === 'source') {
-      setEditedMarkdown(markdownSource);
-    }
-  }, [markdownMode, markdownSource]);
+  const isEdited = editedMarkdown !== markdownSource;
+  // Round-trip: if the edited markdown still parses as a pipe table, CSV/XLSX
+  // exports are rebuilt FROM THE EDITS instead of the original cells.
+  const editedTable = useMemo(
+    () => (isEdited ? parsePipeTable(editedMarkdown.trim()) : null),
+    [isEdited, editedMarkdown],
+  );
   return (
     <section className="flex min-h-[720px] flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -486,11 +503,34 @@ function TableExtractionResultsCard({
             <span className="mr-1 self-center text-[11px] font-medium uppercase tracking-wide text-slate-500">
               Export
             </span>
-            <ExportButton label="CSV" onClick={() => downloadText(`${filenameBase}.csv`, '﻿' + tableToCsv(result), 'text/csv;charset=utf-8')} />
+            {editedTable && (
+              <span
+                className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                title="Your markdown edits parse as a table — CSV and XLSX export the EDITED table. Word/HTML/JSON/flagged-XLSX use the original extraction (they need cell confidence/coords)."
+              >
+                edited → CSV/XLSX
+              </span>
+            )}
+            <ExportButton
+              label="CSV"
+              onClick={() =>
+                downloadText(
+                  `${filenameBase}.csv`,
+                  '﻿' + (editedTable ? tableToCsvString(editedTable) : tableToCsv(result)),
+                  'text/csv;charset=utf-8',
+                )
+              }
+            />
             <ExportButton
               label="XLSX"
               onClick={() => {
-                void downloadTableXlsx(result, filenameBase);
+                if (editedTable) {
+                  void exportSingleTableToXlsx(editedTable).then((bytes) =>
+                    downloadBytes(`${filenameBase}.xlsx`, bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+                  );
+                } else {
+                  void downloadTableXlsx(result, filenameBase);
+                }
               }}
             />
             <ExportButton
@@ -582,9 +622,9 @@ function TableExtractionResultsCard({
             disabled={!result}
             onClick={() => {
               if (resultView === 'markdown') {
-                void copyToClipboard(markdownMode === 'source' ? editedMarkdown : markdownSource);
+                void copyToClipboard(editedMarkdown);
               } else if (resultView === 'csv') {
-                void copyToClipboard(tableToCsv(result!));
+                void copyToClipboard(editedTable ? tableToCsvString(editedTable) : tableToCsv(result!));
               } else {
                 void copyToClipboard(result?.structured_text ?? '');
               }
@@ -599,9 +639,13 @@ function TableExtractionResultsCard({
             disabled={!result}
             onClick={() => {
               if (resultView === 'markdown') {
-                downloadText(`${filenameBase}.md`, markdownSource, 'text/markdown;charset=utf-8');
+                downloadText(`${filenameBase}.md`, editedMarkdown, 'text/markdown;charset=utf-8');
               } else if (resultView === 'csv') {
-                downloadText(`${filenameBase}.csv`, '﻿' + tableToCsv(result!), 'text/csv;charset=utf-8');
+                downloadText(
+                  `${filenameBase}.csv`,
+                  '﻿' + (editedTable ? tableToCsvString(editedTable) : tableToCsv(result!)),
+                  'text/csv;charset=utf-8',
+                );
               } else {
                 downloadText(`${filenameBase}.txt`, result?.structured_text ?? '');
               }

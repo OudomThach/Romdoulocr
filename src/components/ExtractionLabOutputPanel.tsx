@@ -6,6 +6,7 @@
 import { useMemo, useState } from 'react';
 import type { DocumentResult } from '@/types/api';
 import { copyToClipboard } from '@/lib/utils';
+import { docText } from '@/lib/documentExport';
 import { JsonTree } from '@/components/JsonTree';
 
 export type OutputView = 'document' | 'csv' | 'text' | 'json';
@@ -38,13 +39,8 @@ export function ExtractionLabOutputPanel({
   };
   const [copied, setCopied] = useState<string | null>(null);
 
-  const fullText = useMemo(
-    () =>
-      result?.full_text ??
-      result?.pages?.map((p) => p.regions.map((r) => r.text).join('\n')).join('\n\n') ??
-      '',
-    [result],
-  );
+  // Blank-aware: full_text can arrive as "" — docText falls back to region text.
+  const fullText = useMemo(() => (result ? docText(result) : ''), [result]);
   const csv = useMemo(() => {
     if (!result) return '';
     const tableRegions = result.pages

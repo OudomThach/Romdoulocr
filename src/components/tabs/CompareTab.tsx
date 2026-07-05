@@ -129,7 +129,12 @@ function preferredLabel(vote: Choice | null): string | undefined {
 
 /** Plain extracted text for a result, used to score against ground truth. */
 function textOf(mode: Mode, data: unknown): string {
-  if (mode === 'document') return (data as DocumentResult).full_text ?? '';
+  // Blank-aware: full_text can arrive as "" — fall back to region text so
+  // scoring/exports don't see an empty document.
+  if (mode === 'document') {
+    const doc = data as DocumentResult;
+    return doc.full_text?.trim() ? doc.full_text : regionsText(doc);
+  }
   if (mode === 'table') return (data as TableResult).structured_text ?? '';
   return normalizeOcrResponse(data).text;
 }
@@ -148,7 +153,7 @@ function mergeDocResults(parts: DocumentResult[]): DocumentResult {
     filename: parts[0]?.filename ?? '',
     num_pages: pages.length,
     pages,
-    full_text: parts.map((p) => p.full_text ?? regionsText(p)).filter(Boolean).join('\n\n') || null,
+    full_text: parts.map((p) => (p.full_text?.trim() ? p.full_text : regionsText(p))).filter(Boolean).join('\n\n') || null,
     translated_text: null,
     table_crops: crops('table_crops'),
     figure_crops: crops('figure_crops'),

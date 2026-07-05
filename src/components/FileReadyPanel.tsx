@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { RomdoulLogo } from '@/components/RomdoulLogo';
 import { fmtBytes, isImage, isPdf } from '@/lib/utils';
 import { pageRangeToString, parsePageRangeFromString } from '@/hooks/usePdfPageThumbnails';
 
@@ -69,14 +70,17 @@ export function FileReadyPanel({
 
   if (files.length === 0) {
     return (
-      <section className="flex min-h-[720px] flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="grid h-[520px] place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center">
-          <div className="max-w-sm px-6">
-            <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-full bg-white text-slate-400 shadow-sm">
-              <DocumentIcon className="h-6 w-6" />
+      <section className="panel-raised rise-in flex min-h-[720px] flex-col p-6">
+        <div className="hero-glow grid flex-1 place-items-center rounded-2xl text-center">
+          <div className="max-w-md px-6">
+            {/* Branded watermark — the Angkor mark establishes identity before
+                any file is uploaded, instead of a generic gray doc icon. */}
+            <div className="mx-auto mb-6 grid h-24 w-24 place-items-center rounded-3xl bg-accent/10 text-accent ring-1 ring-accent/30 backdrop-blur">
+              <RomdoulLogo className="h-14 w-14 drop-shadow-[0_0_20px_rgba(0,229,255,0.5)]" />
             </div>
-            <div className="text-sm font-semibold text-slate-950">{emptyTitle}</div>
-            <p className="mt-1 text-sm text-slate-500">{emptyDescription}</p>
+            <h2 className="display">{emptyTitle}</h2>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-slate-500">{emptyDescription}</p>
+            <div className="temple-ridge mx-auto mt-6 w-40" />
           </div>
         </div>
       </section>
@@ -84,7 +88,7 @@ export function FileReadyPanel({
   }
 
   return (
-    <section className="flex min-h-[720px] flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="panel-raised rise-in flex min-h-[720px] flex-col p-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-slate-950">File Ready for Processing</h2>
@@ -114,7 +118,7 @@ export function FileReadyPanel({
 
       <div className="grid flex-1 content-start gap-5 pt-8">
         <div className="text-center">
-          <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
+          <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-accent/10 text-accent ring-1 ring-accent/30">
             <DocumentIcon className="h-7 w-7" />
           </div>
           <p className="text-sm text-slate-700">{readyDescription}</p>
@@ -156,10 +160,10 @@ export function FileReadyPanel({
           type="button"
           onClick={isRunning ? onCancel : onRun}
           disabled={!isRunning && selectedCount === 0}
-          className={`inline-flex min-h-11 w-full max-w-sm items-center justify-center rounded-lg px-5 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`min-h-11 w-full max-w-sm px-5 py-3 ${
             isRunning
-              ? 'border border-rose-200 bg-white text-rose-700 hover:bg-rose-50'
-              : 'bg-slate-950 text-white hover:bg-slate-800'
+              ? 'btn border border-rose-200 bg-white text-rose-700 hover:bg-rose-50'
+              : 'btn-primary'
           }`}
         >
           {isRunning ? 'Cancel' : preparingMsg ? runningLabel : actionLabel(selectedCount, totalCount)}

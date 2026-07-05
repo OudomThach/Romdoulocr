@@ -35,6 +35,10 @@ export interface EnhanceOptions {
   autoCrop?: boolean;
   /** Local (Sauvola) binarization for clean black-on-white on uneven scans. */
   adaptiveThreshold?: boolean;
+  /** Output encoding. 'jpeg' (q0.92) shrinks uploads ~5-10× vs PNG with no
+   *  measurable OCR impact — used by the upload preprocessing preset.
+   *  Default 'png' (lossless) for display/format-conversion uses. */
+  format?: 'png' | 'jpeg';
 }
 
 export const DEFAULT_ENHANCE: Required<EnhanceOptions> = {
@@ -48,6 +52,7 @@ export const DEFAULT_ENHANCE: Required<EnhanceOptions> = {
   deskew: false,
   autoCrop: false,
   adaptiveThreshold: false,
+  format: 'png',
 };
 
 /** Detect "is this a no-op" so we can skip the canvas round-trip entirely. */
@@ -152,13 +157,31 @@ export async function processImage(file: Blob, opts: EnhanceOptions = {}): Promi
     }
   }
 
-  // Encode as PNG (lossless, best for OCR downstream).
+  // Encode. PNG (lossless) by default; JPEG q0.92 for the upload preset —
+  // ~5-10× smaller with no measurable OCR impact. JPEG has no alpha channel
+  // (transparent → black), so composite onto white first.
+  const jpeg = opts.format === 'jpeg';
+  let encodeCanvas = canvas;
+  if (jpeg) {
+    const flat = document.createElement('canvas');
+    flat.width = canvas.width;
+    flat.height = canvas.height;
+    const fctx = flat.getContext('2d');
+    if (fctx) {
+      fctx.fillStyle = '#ffffff';
+      fctx.fillRect(0, 0, flat.width, flat.height);
+      fctx.drawImage(canvas, 0, 0);
+      encodeCanvas = flat;
+    }
+  }
+  const mime = jpeg ? 'image/jpeg' : 'image/png';
   const blob: Blob = await new Promise((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas.toBlob failed'))), 'image/png'),
+    encodeCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas.toBlob failed'))), mime, jpeg ? 0.92 : undefined),
   );
 
-  const name = swapExt((file as File).name ?? 'image.png', '.png');
-  return new File([blob], name, { type: 'image/png' });
+  const ext = jpeg ? '.jpg' : '.png';
+  const name = swapExt((file as File).name ?? `image${ext}`, ext);
+  return new File([blob], name, { type: mime });
 }
 
 /**

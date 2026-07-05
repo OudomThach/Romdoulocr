@@ -1,24 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBanner } from '@/components/ErrorBanner';
-import { DocumentScanner } from '@/components/DocumentScanner';
+import { SimpleCrop } from '@/components/SimpleCrop';
 import { FileDropzone } from '@/components/FileDropzone';
-import { FileReadyPanel } from '@/components/FileReadyPanel';
 import { PagePreview } from '@/components/PagePreview';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SettingToggle } from '@/components/ExtractionSettingsCard';
 import { useBatchProcessor } from '@/hooks/useBatchProcessor';
 import { useHistoryAutoSave } from '@/hooks/useHistoryAutoSave';
-import { usePdfPageSelection } from '@/hooks/usePdfPageSelection';
+import { imageFileToThumbnail } from '@/lib/pdfProcessing';
 import { api } from '@/lib/api';
-import { getPdfPageCount, renderPdfPages } from '@/lib/pdfProcessing';
 import { copyToClipboard, isPdf } from '@/lib/utils';
 import { ResultsToolbar } from '@/components/ResultsToolbar';
 import { processImage } from '@/lib/imageProcessing';
 import { useSettingsStore } from '@/hooks/useSettingsStore';
-import { preprocessOpts, rasterFor } from '@/lib/extractionConfig';
-import { ExtractionSettingsCard } from '@/components/ExtractionSettingsCard';
-import type { OcrImageResponse } from '@/types/api';
-import { normalizeOcrResponse } from '@/types/api';
+import { minimalPreprocessOpts } from '@/lib/extractionConfig';
+import { useLocale } from '@/lib/i18n';
+import type { DocumentResult, OcrImageResponse } from '@/types/api';
 
 interface PreparedFile {
   id: string;
@@ -26,320 +23,352 @@ interface PreparedFile {
   totalPages: number;
 }
 
+/**
+ * OCR Image — mobile-first "scanner" flow:
+ * ONE image (no PDFs, no multi-file), OCR starts AUTOMATICALLY the moment an
+ * image is dropped / picked / photographed / pasted. No run button.
+ * The other tabs keep the full multi-file workflow.
+ */
 export function OcrImageTab() {
   const [files, setFiles] = useState<File[]>([]);
   const extraction = useSettingsStore((s) => s.extraction);
   const setExtraction = useSettingsStore((s) => s.setExtraction);
   const useCtc = useSettingsStore((s) => s.ocr.useCtc);
   const setOcr = useSettingsStore((s) => s.setOcr);
-  const [prepared, setPrepared] = useState<PreparedFile[]>([]);
-  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [preparingMsg, setPreparingMsg] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
-  // File currently open in the CamScanner-style crop modal (single image only).
+  // File currently open in the CamScanner-style crop modal.
   const [scanFile, setScanFile] = useState<File | null>(null);
-
-  const singleImage = files.length === 1 && !isPdf(files[0].name);
-
-  const { pageSelections, pageThumbnails, thumbLoading, onPageSelectionChange } =
-    usePdfPageSelection(files, fileKey);
-
-  useEffect(() => {
-    let cancelled = false;
-    setPdfError(null);
-    if (files.length === 0) { setPrepared([]); return; }
-    (async () => {
-      const out: PreparedFile[] = [];
-      for (const f of files) {
-        if (cancelled) return;
-        const key = fileKey(f);
-        if (isPdf(f.name)) {
-          try {
-            const totalPages = await getPdfPageCount(f);
-            if (cancelled) return;
-            out.push({ id: key, source: f, totalPages });
-          } catch (e) {
-            if (cancelled) return;
-            setPdfError(`${f.name}: ${e instanceof Error ? e.message : 'PDF read failed'}`);
-            out.push({ id: key, source: f, totalPages: 1 });
-          }
-        } else {
-          out.push({ id: key, source: f, totalPages: 1 });
-        }
-      }
-      if (!cancelled) setPrepared(out);
-    })();
-    return () => { cancelled = true; };
-  }, [files]);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const { t } = useLocale();
 
   const batch = useBatchProcessor<
     { fileKey: string; file: File; useCtc: boolean },
     OcrImageResponse
   >({
-    concurrency: 2,
+    concurrency: 1,
     run: async (args, signal) => {
       const a = args as { file: File; useCtc: boolean };
-      const raw = await api.ocrImage(a.file, { useCtc: a.useCtc }, { signal, onProgress: setProgress });
-      return normalizeOcrResponse(raw as unknown ?? raw);
+      // Pass 1 — layout-aware (same engine as Parse Document): detect regions,
+      // OCR each. Best for real documents; the single-line /ocr-image endpoint
+      // garbles multi-line paragraphs. We reshape the DocumentResult into the
+      // OcrImageResponse this tab renders.
+      const doc = await api.parsePdf(
+        [a.file],
+        { detectLayout: true, detectLines: true, useCtc: a.useCtc },
+        { signal, onProgress: setProgress },
+      );
+      let text = pickDocText(doc);
+      let confidence = avgConfidence(doc);
+      let decoder = a.useCtc ? 'layout+ctc' : 'layout';
+      // Pass 2 — the layout pass found nothing readable. Happens on signs /
+      // photos / screenshots where the detector classifies the text area as a
+      // PICTURE region (confidence but no text). Re-read the WHOLE image with
+      // no layout gating — same fallback the Document tab (full-page OCR) and
+      // the vLLM adapter use. Best-effort: never lose the pass-1 result.
+      if (!text.trim()) {
+        try {
+          const full = await api.parsePdf(
+            [a.file],
+            { detectLayout: false, detectLines: true, useCtc: a.useCtc },
+            { signal },
+          );
+          const fullText = pickDocText(full);
+          if (fullText.trim()) {
+            text = fullText;
+            confidence = avgConfidence(full) || confidence;
+            decoder = a.useCtc ? 'full-page+ctc' : 'full-page';
+          }
+        } catch {
+          // fall through with the (empty) layout-pass result
+        }
+      }
+      return { text, confidence, filename: a.file.name, decoder };
     },
   });
 
-  useHistoryAutoSave<PreparedFile>('ocr', batch, prepared, { useCtc, concurrency: 2 });
-
-  const onSubmit = async () => {
-    if (prepared.length === 0) return;
-    setProgress(0);
-    setPreparingMsg('Preparing files...');
-    const doneKeys = new Set(
-      batch.items.filter((it) => it.status === 'done').map((it) => (it.args as { fileKey: string }).fileKey),
-    );
-    try {
-      const items: { fileKey: string; file: File; useCtc: boolean }[] = [];
-      for (const p of prepared) {
-        if (isPdf(p.source.name)) {
-          const key = fileKey(p.source);
-          const selected = pageSelections[key] ?? Array.from({ length: p.totalPages }, (_, i) => i + 1);
-          const pages = selected.length > 0 ? selected : Array.from({ length: p.totalPages }, (_, i) => i + 1);
-          if (pages.length === 0) { setPdfError(`No pages selected for ${p.source.name}`); setPreparingMsg(null); return; }
-          setPreparingMsg(`Rasterizing ${p.source.name} (${pages.length} pages)...`);
-          const rendered = await renderPdfPages(p.source, pages, rasterFor(extraction.highRes).dpi);
-          for (let pi = 0; pi < rendered.length; pi++) {
-            const idx = pages.length > 1 ? `${key}-p${pi + 1}` : key;
-            if (!doneKeys.has(idx)) items.push({ fileKey: idx, file: rendered[pi].file, useCtc });
-          }
-        } else {
-          if (!doneKeys.has(p.id)) {
-            setPreparingMsg(`Preprocessing ${p.source.name}...`);
-            const processed = await processImage(p.source, preprocessOpts(extraction.highRes));
-            items.push({ fileKey: p.id, file: processed, useCtc });
-          }
-        }
+  // History integration expects the prepared-files shape used by other tabs.
+  const prepared = useMemo<PreparedFile[]>(
+    () => files.map((f) => ({ id: fileKey(f), source: f, totalPages: 1 })),
+    [files],
+  );
+  // Save a compact thumbnail of the user's original (or cropped) image with
+  // each run so History shows the photo next to the text, like the other tabs.
+  const captureHistoryPreview = useCallback(
+    async (_item: { args?: unknown }, prep: PreparedFile): Promise<Record<number, string> | undefined> => {
+      try {
+        return { 1: await imageFileToThumbnail(prep.source) };
+      } catch {
+        return undefined; // degrade to a text-only history entry
       }
-      if (items.length === 0) { setPreparingMsg(null); return; }
-      batch.enqueueMany(items);
-      setPreparingMsg(null);
-    } catch (e) {
-      setPreparingMsg(null);
-      setPdfError(e instanceof Error ? e.message : 'Rasterization failed');
-    }
+    },
+    [],
+  );
+  useHistoryAutoSave<PreparedFile>('ocr', batch, prepared, { useCtc, concurrency: 1 }, captureHistoryPreview);
+
+  // ── Auto-OCR ──────────────────────────────────────────────────────────────
+  // The moment a (new) image lands, preprocess and enqueue it. lastRunKey
+  // guards against re-fires for the same file; "Run again" clears it and
+  // re-sets files to retrigger. Settings changes alone do NOT auto re-run
+  // (deps are [files] on purpose — t/extraction/useCtc are read fresh but a
+  // toggle flip shouldn't restart a finished scan uninvited).
+  const lastRunKey = useRef<string | null>(null);
+  useEffect(() => {
+    const f = files[0];
+    if (!f || isPdf(f.name)) return;
+    const key = fileKey(f);
+    if (lastRunKey.current === key) return;
+    lastRunKey.current = key;
+    let cancelled = false;
+    (async () => {
+      batch.reset();
+      setLocalError(null);
+      setPreparingMsg(t('ocr.preparing'));
+      try {
+        // Minimal preprocessing: resolution normalization + JPEG encode ONLY —
+        // no grayscale/contrast/deskew/etc. silently editing the user's image.
+        const processed = await processImage(f, minimalPreprocessOpts(extraction.highRes));
+        if (cancelled) return;
+        setProgress(0);
+        batch.enqueueMany([{ fileKey: key, file: processed, useCtc }]);
+      } catch (e) {
+        if (!cancelled) setLocalError(e instanceof Error ? e.message : 'Image preprocessing failed');
+      } finally {
+        if (!cancelled) setPreparingMsg(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+  }, [files]);
+
+  const runAgain = () => {
+    const f = files[0];
+    if (!f) return;
+    lastRunKey.current = null;
+    setFiles([f]); // fresh array retriggers the auto-run effect
   };
 
-  // Each OCR'd page is its own batch item. Track which one is shown so the
-  // user can page through them with the same prev/next controls as the
-  // other tabs.
-  const doneItems = useMemo(
-    () => batch.items.filter((it) => it.status === 'done' && it.result),
-    [batch.items],
-  );
-  const [ocrIndex, setOcrIndex] = useState(0);
-  // New batch of results → jump to the latest page.
-  useEffect(() => {
-    if (doneItems.length > 0) setOcrIndex(doneItems.length - 1);
-  }, [doneItems.length]);
-  const safeOcrIndex = Math.min(Math.max(0, ocrIndex), Math.max(0, doneItems.length - 1));
-  const currentResultItem = doneItems[safeOcrIndex] ?? batch.items.find((it) => it.result) ?? null;
+  const resetAll = () => {
+    batch.cancel();
+    batch.reset();
+    setFiles([]);
+    lastRunKey.current = null;
+    setLocalError(null);
+    setProgress(null);
+  };
 
+  const currentResultItem = batch.items.find((it) => it.status === 'done' && it.result) ?? null;
   const currentResult = currentResultItem?.result ?? null;
   const cleanText = currentResult?.text ?? '';
+  const busy = batch.isRunning || preparingMsg !== null;
 
-  // Source image for the page currently shown (the rasterized/processed file
-  // that was sent to OCR), revoked when it changes to avoid leaks.
-  const currentImageUrl = useMemo(() => {
-    const f = (currentResultItem?.args as { file?: File } | undefined)?.file;
-    return f ? URL.createObjectURL(f) : undefined;
-  }, [currentResultItem]);
-  useEffect(() => {
-    return () => {
-      if (currentImageUrl) URL.revokeObjectURL(currentImageUrl);
-    };
-  }, [currentImageUrl]);
+  // The user's ORIGINAL upload (or their crop) — shown while running AND in
+  // the result view. We deliberately do NOT show the engine-side file so the
+  // preview always matches what the user gave us.
+  const pickedUrl = useMemo(() => (files[0] ? URL.createObjectURL(files[0]) : undefined), [files]);
+  useEffect(() => () => { if (pickedUrl) URL.revokeObjectURL(pickedUrl); }, [pickedUrl]);
+
+  const onCameraPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) setFiles([f]);
+    e.target.value = ''; // allow re-shooting the same file
+  };
 
   return (
-    <div className="min-h-[calc(100vh-116px)] text-slate-950">
-      <div className="grid gap-6 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]">
-        <div className="grid min-w-0 grid-cols-1 content-start gap-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="mb-5 text-lg font-semibold tracking-tight text-slate-950">Upload Image</h2>
+    // Mobile-first: one centered column; comfortable thumb targets throughout.
+    <div className="mx-auto w-full max-w-3xl text-slate-950">
+      {/* Hidden camera input — `capture` opens the rear camera directly on phones. */}
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={onCameraPick}
+        className="sr-only"
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
+      {!currentResult && !busy && (
+        <section className="panel-raised rise-in p-5 sm:p-8">
+          <h2 className="display">{t('ocr.title')}</h2>
+          <p className="mt-1 text-sm text-slate-500">{t('ocr.subtitle')}</p>
+
+          <div className="mt-5">
             <FileDropzone
-              multiple
-              accept="pdf-or-image"
+              accept="image-only"
               files={files}
               onChange={setFiles}
-              disabled={batch.isRunning}
+              disabled={busy}
+              labels={{
+                title: t('ocr.drop.title'),
+                replaceTitle: t('ocr.drop.title'),
+                hint: t('ocr.drop.hint'),
+                accepted: t('ocr.drop.accepted'),
+              }}
             />
-            {singleImage && !currentResult && !batch.isRunning && (
-              <button
-                type="button"
-                onClick={() => setScanFile(files[0])}
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-950 shadow-sm hover:bg-slate-50"
-              >
-                <CameraIcon className="h-4 w-4" />
-                Scan document — auto-crop, de-skew &amp; clean
-              </button>
-            )}
-            {(files.length > 0 || !!currentResult || batch.isRunning) && (
-              <div className="mt-4 rounded-lg border border-slate-300 bg-slate-100 px-4 py-4 text-sm text-slate-700">
-                {currentResult ? (
-                  <>
-                    <div className="font-semibold text-slate-950">&#10003; OCR Complete</div>
-                    <div className="mt-2 space-y-1 text-xs">
-                      {/* /ocr-image doesn't return a confidence; only show it
-                          when the value is real (>0) to avoid a bogus "0%". */}
-                      {currentResult.confidence > 0 && (
-                        <div>&bull; Confidence: {Math.round(currentResult.confidence * 100)}%</div>
-                      )}
-                      <div>&bull; Decoder: {currentResult.decoder ?? 'ctc'}</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { void copyToClipboard(cleanText); }}
-                      className="mt-3 inline-flex items-center gap-1.5 rounded bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-                    >
-                      <CopyIcon className="h-3.5 w-3.5" />
-                      Copy Clean Text
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div className="font-semibold text-slate-950">
-                      {batch.isRunning ? 'Running OCR...' : preparingMsg ? 'Preparing file...' : 'Ready to run OCR'}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-600">
-                      {preparingMsg ?? `${files.length} file${files.length === 1 ? '' : 's'} selected`}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </section>
+          </div>
 
-          <ExtractionSettingsCard
-            highRes={extraction.highRes}
-            fullPageOcr={extraction.fullPageOcr}
-            onHighResChange={(v) => setExtraction({ highRes: v })}
-            onFullPageOcrChange={(v) => setExtraction({ fullPageOcr: v })}
-            disabled={batch.isRunning}
-            showFullPage={false}
-          />
+          <button
+            type="button"
+            onClick={() => cameraRef.current?.click()}
+            className="btn-primary mt-4 min-h-12 w-full sm:w-auto"
+          >
+            <CameraIcon className="h-5 w-5" />
+            {t('ocr.takePhoto')}
+          </button>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="mb-1 text-sm font-semibold text-slate-950">Decoder</h2>
-            <p className="mb-4 text-xs text-slate-500">CTC is recommended for Khmer. Turn off to use the autoregressive decoder.</p>
-            <SettingToggle
-              label="Use CTC decoder"
-              hint="On = faster, fewer repetition loops"
-              checked={useCtc}
-              onChange={(v) => setOcr({ useCtc: v })}
-              disabled={batch.isRunning}
-            />
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="mb-4 text-sm font-semibold text-slate-950">How to Use</h2>
-            <ol className="space-y-3 text-sm text-slate-600">
-              <li>1. Upload a PDF or image file</li>
-              <li>2. Click "Run OCR" button</li>
-              <li>3. View extracted text and copy or download</li>
-            </ol>
-          </section>
-        </div>
-
-        {currentResult ? (
-          <section className="flex min-h-[720px] flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <header className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-slate-950">OCR Result</h2>
-                <p className="truncate text-sm text-slate-500">{currentResult.filename ?? 'OCR complete'}</p>
-              </div>
-              <ResultsToolbar
-                text={cleanText}
-                filenameBase={sanitizeFilename((currentResult.filename ?? 'ocr').replace(/\.[^.]+$/, ''))}
-                json={currentResult}
-                markdownSource={cleanText}
+          <details className="group mt-6">
+            <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-accent">
+              {t('ocr.settings')}
+            </summary>
+            <div className="mt-3 grid gap-3 text-sm text-slate-700">
+              <SettingToggle
+                label={t('ocr.highRes')}
+                hint={t('ocr.highRes.hint')}
+                checked={extraction.highRes}
+                onChange={(v) => setExtraction({ highRes: v })}
+                disabled={busy}
               />
-            </header>
+              <SettingToggle
+                label={t('ocr.ctc')}
+                hint={t('ocr.ctc.hint')}
+                checked={useCtc}
+                onChange={(v) => setOcr({ useCtc: v })}
+                disabled={busy}
+              />
+            </div>
+          </details>
+        </section>
+      )}
 
-            <div className="mb-4 mt-4 flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-              {currentResult.confidence > 0 && (
-                <span>Confidence: <strong>{Math.round(currentResult.confidence * 100)}%</strong></span>
-              )}
-              <span>Decoder: <strong>{currentResult.decoder ?? 'ctc'}</strong></span>
-              <span>Filename: <strong>{currentResult.filename ?? '-'}</strong></span>
-              <div className="ml-auto">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void copyToClipboard(cleanText);
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-                >
-                  <CopyIcon className="h-3.5 w-3.5" />
-                  Copy Text
-                </button>
+      {busy && !currentResult && (
+        <section className="panel-raised rise-in p-5 sm:p-8">
+          <div className="flex items-center gap-4">
+            {pickedUrl && (
+              <img
+                src={pickedUrl}
+                alt=""
+                className="h-20 w-20 shrink-0 rounded-lg border border-slate-200 object-cover"
+              />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">{files[0]?.name}</div>
+              <div className="mt-1 text-xs text-accent">
+                {preparingMsg ?? (progress !== null && progress < 100 ? t('ocr.uploading') : t('ocr.running'))}
               </div>
             </div>
+          </div>
+          <div className="mt-5">
+            <ProgressBar
+              value={batch.isRunning && progress !== null && progress < 100 ? progress : null}
+              label={preparingMsg ?? t('ocr.running')}
+            />
+          </div>
+          <button type="button" onClick={resetAll} className="btn-secondary mt-5 min-h-11 w-full sm:w-auto">
+            {t('common.cancel')}
+          </button>
+        </section>
+      )}
 
-            <div className="min-h-0 flex-1">
-              <PagePreview
-                imageUrl={currentImageUrl}
-                alt={currentResult.filename ?? 'OCR page'}
-                pageIndex={safeOcrIndex}
-                numPages={doneItems.length}
-                onPageChange={setOcrIndex}
-                outputLabel="OCR Text"
-                emptyImageMessage="No source image available."
-                output={
+      {currentResult && (
+        <section className="panel-raised rise-in flex flex-col p-5 sm:p-8">
+          <header className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold tracking-tight">{t('ocr.result')}</h2>
+              <p className="truncate text-sm text-slate-500">{currentResult.filename ?? ''}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {currentResult.confidence > 0 && (
+                <span className="badge border-accent/40 bg-accent/10 text-accent">
+                  {t('ocr.confidence')} {Math.round(currentResult.confidence * 100)}%
+                </span>
+              )}
+            </div>
+          </header>
+
+          {/* Action row — thumb-sized, copy is the hero action. */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { void copyToClipboard(cleanText); }}
+              disabled={!cleanText.trim()}
+              className="btn-primary min-h-12 flex-1 sm:flex-none"
+            >
+              <CopyIcon className="h-4 w-4" />
+              {t('ocr.copy')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setScanFile(files[0] ?? null)}
+              className="btn-secondary min-h-12"
+              disabled={!files[0]}
+            >
+              <CameraIcon className="h-4 w-4" />
+              {t('ocr.crop')}
+            </button>
+            <button type="button" onClick={runAgain} className="btn-ghost min-h-12">
+              ↺ {t('ocr.rerun')}
+            </button>
+            <button type="button" onClick={resetAll} className="btn-ghost min-h-12">
+              {t('ocr.newImage')}
+            </button>
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <ResultsToolbar
+              text={cleanText}
+              filenameBase={sanitizeFilename((currentResult.filename ?? 'ocr').replace(/\.[^.]+$/, ''))}
+              json={currentResult}
+              markdownSource={cleanText}
+            />
+          </div>
+
+          <div className="mt-4 min-h-0 flex-1">
+            <PagePreview
+              imageUrl={pickedUrl}
+              alt={currentResult.filename ?? 'OCR page'}
+              pageIndex={0}
+              numPages={1}
+              onPageChange={() => {}}
+              outputLabel={t('ocr.text')}
+              emptyImageMessage={t('ocr.noImage')}
+              output={
+                cleanText.trim() ? (
                   <div
-                    className="whitespace-pre-wrap"
+                    className="whitespace-pre-wrap text-base leading-relaxed"
                     style={{ fontFamily: "'Noto Sans Khmer', 'Khmer OS Siemreap', 'Segoe UI', sans-serif" }}
                   >
                     {cleanText}
                   </div>
-                }
-              />
-            </div>
-          </section>
-        ) : (
-          <FileReadyPanel
-            files={prepared}
-            pageSelections={pageSelections}
-            pageThumbnails={pageThumbnails}
-            thumbLoading={thumbLoading}
-            onPageSelectionChange={onPageSelectionChange}
-            isRunning={batch.isRunning}
-            preparingMsg={preparingMsg}
-            onRun={onSubmit}
-            onCancel={() => batch.cancel()}
-            actionLabel={(selected) => `Run OCR on ${selected} selected page${selected === 1 ? '' : 's'}`}
-            runningLabel="Preparing OCR..."
-            emptyTitle="No OCR yet"
-            emptyDescription="Upload a PDF or image, then select the pages to process."
-            readyDescription="File uploaded successfully. Click below to run OCR on the selected pages."
-          />
-        )}
-      </div>
+                ) : (
+                  <div className="grid gap-1.5 text-sm">
+                    <span className="font-medium text-amber-600">{t('ocr.noText')}</span>
+                    <span className="text-slate-500">{t('ocr.noText.hint')}</span>
+                  </div>
+                )
+              }
+            />
+          </div>
+        </section>
+      )}
 
       <div className="mt-4 grid gap-2">
-        {preparingMsg && <ProgressBar value={null} label={preparingMsg} />}
-        {pdfError && <ErrorBanner error={new Error(pdfError)} />}
-        {batch.isRunning && (
-          batch.progress.active <= 1 && progress !== null ? (
-            <ProgressBar value={progress} label="Uploading to API..." />
-          ) : (
-            <ProgressBar value={null} label={`Processing ${batch.progress.active} files... (${batch.progress.done} done)`} />
-          )
-        )}
+        {localError && <ErrorBanner error={new Error(localError)} />}
         {batch.hasErrors && batch.items.some((it) => it.status === 'error' && it.error) && (
           <ErrorBanner error={batch.items.find((it) => it.status === 'error' && it.error)?.error} />
         )}
       </div>
 
       {scanFile && (
-        <DocumentScanner
+        <SimpleCrop
           file={scanFile}
-          onDone={(scanned) => {
-            setFiles([scanned]);
+          onDone={(cropped) => {
             setScanFile(null);
+            setFiles([cropped]); // new fileKey → auto-OCR re-fires on the cropped area
           }}
           onCancel={() => setScanFile(null)}
         />
@@ -350,6 +379,21 @@ export function OcrImageTab() {
 
 function fileKey(f: File): string { return `${f.name}|${f.size}|${f.lastModified}`; }
 function sanitizeFilename(name: string): string { return name.replace(/[^a-z0-9._-]+/gi, '_').slice(0, 80); }
+
+/** Single-image text pick: non-blank full_text, else joined region text (no
+ * page headers — this tab is always one page). full_text can arrive as "". */
+function pickDocText(doc: DocumentResult): string {
+  const joined = doc.pages
+    .flatMap((p) => p.regions.map((r) => (r.text ?? '').trim()))
+    .filter(Boolean)
+    .join('\n');
+  return doc.full_text?.trim() ? doc.full_text : joined;
+}
+
+function avgConfidence(doc: DocumentResult): number {
+  const confs = doc.pages.flatMap((p) => p.regions.map((r) => r.confidence)).filter((c) => c > 0);
+  return confs.length ? confs.reduce((s, c) => s + c, 0) / confs.length : 0;
+}
 
 function CopyIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>;

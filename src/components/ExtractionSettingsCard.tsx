@@ -19,7 +19,7 @@ export function ExtractionSettingsCard({
   showFullPage?: boolean;
 }) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="panel p-6">
       <h2 className="mb-1 text-sm font-semibold text-slate-950">Extraction Quality</h2>
       <p className="mb-4 text-xs text-slate-500">Maximize how much text is captured. Turn off to revert.</p>
       <div className="grid gap-3 text-sm text-slate-700">
@@ -59,12 +59,14 @@ export function SettingToggle({
 }) {
   return (
     <label
-      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 transition-colors ${
-        checked ? 'border-slate-300 bg-slate-50' : 'border-slate-200 bg-white'
+      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 transition-all ${
+        checked
+          ? 'border-accent/50 bg-accent/10 dark:shadow-[0_0_16px_-4px_rgb(0_229_255_/_0.5)]'
+          : 'border-slate-200 bg-white'
       } ${disabled ? 'opacity-60' : 'cursor-pointer'}`}
     >
       <span className="min-w-0">
-        <span className="block font-medium text-slate-950">{label}</span>
+        <span className={`block font-medium ${checked ? 'text-accent' : 'text-slate-950'}`}>{label}</span>
         <span className="block text-xs text-slate-500">{hint}</span>
       </span>
       <input
@@ -72,7 +74,8 @@ export function SettingToggle({
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
         disabled={disabled}
-        className="h-4 w-4 shrink-0 rounded border-slate-300 text-slate-950 focus:ring-slate-400"
+        className="h-4 w-4 shrink-0 rounded border-slate-300 focus:ring-accent/40"
+        style={{ accentColor: 'rgb(var(--c-accent))' }}
       />
     </label>
   );
