@@ -52,7 +52,10 @@ ADAPTER_TOKEN = os.environ.get("ADAPTER_TOKEN", "").strip()
 
 @app.middleware("http")
 async def _require_token(request: Request, call_next):
-    if ADAPTER_TOKEN and request.method != "OPTIONS":
+    # /health is exempt: it's non-sensitive, and the Docker healthcheck +
+    # public status probes hit it without the token.
+    exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
+    if ADAPTER_TOKEN and not exempt:
         # Constant-time compare to avoid leaking the token via timing.
         supplied = request.headers.get("x-adapter-token", "")
         if not hmac.compare_digest(supplied, ADAPTER_TOKEN):
