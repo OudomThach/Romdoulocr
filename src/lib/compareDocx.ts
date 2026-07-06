@@ -35,6 +35,7 @@ export interface CompareDocxPageImage {
   h: number;
   default?: string; // PNG data-URL with Khmer Parsing API's boxes
   vllm?: string; // PNG data-URL with vLLM's boxes
+  plain?: string; // PNG data-URL, no overlay (used for table mode page-by-page)
 }
 
 export interface CompareDocxItem {
@@ -123,13 +124,50 @@ function pageCountOf(data?: CompareDocxPane['data']): number {
   return doc?.pages?.length ?? (data ? 1 : 0);
 }
 
-/** Markdown for ONE column at page index i (document → that page; else whole). */
+/** Split a merged table's structured_text into per-page chunks on the
+ * "## Page N" headers the multi-page table merge inserts. No headers → one
+ * chunk (single-page table). */
+export function splitTablePages(text: string): { page: number; md: string }[] {
+  const src = text ?? '';
+  const re = /^##\s*Page\s+(\d+)\s*$/gim;
+  const marks = [...src.matchAll(re)];
+  if (!marks.length) return [{ page: 1, md: src.trim() }];
+  const out: { page: number; md: string }[] = [];
+  for (let k = 0; k < marks.length; k++) {
+    const start = (marks[k].index ?? 0) + marks[k][0].length;
+    const end = k + 1 < marks.length ? marks[k + 1].index ?? src.length : src.length;
+    out.push({ page: Number(marks[k][1]), md: src.slice(start, end).trim() });
+  }
+  return out;
+}
+
+/** How many "pages" an item renders: document → page array; table → the number
+ * of ## Page chunks (or plain page images); everything else → 1. */
+export function itemPageCount(item: CompareDocxItem): number {
+  if (item.mode === 'document') {
+    const d = paneOf(item, 'default')?.data as DocumentResult | undefined;
+    const v = paneOf(item, 'vllm')?.data as DocumentResult | undefined;
+    return Math.max(d?.pages?.length ?? 0, v?.pages?.length ?? 0, 1);
+  }
+  if (item.mode === 'table') {
+    const d = splitTablePages((paneOf(item, 'default')?.data as TableResult | undefined)?.structured_text ?? '');
+    const v = splitTablePages((paneOf(item, 'vllm')?.data as TableResult | undefined)?.structured_text ?? '');
+    return Math.max(d.length, v.length, item.pageImages?.length ?? 0, 1);
+  }
+  return 1;
+}
+
+/** Markdown for ONE column at page index i (document → that page; table → that
+ * ## Page chunk; else whole). */
 function columnMarkdown(item: CompareDocxItem, pane: CompareDocxPane | undefined, i: number): string {
   if (!pane || pane.error) return pane?.error ? `Error: ${pane.error}` : '(no result)';
   const data = pane.data;
   if (!data) return '(no result)';
   if (item.mode === 'document') return pageToMarkdown(data as DocumentResult, i + 1) || '(empty)';
-  if (item.mode === 'table') return (data as TableResult).structured_text || '(empty)';
+  if (item.mode === 'table') {
+    const pages = splitTablePages((data as TableResult).structured_text || '');
+    return pages[i]?.md || '(empty)';
+  }
   return normalizeOcrResponse(data).text || '(empty)';
 }
 
@@ -630,15 +668,29 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
     const dMs = d?.pageMs ?? [];
     const vMs = v?.pageMs ?? [];
     const isDoc = item.mode === 'document';
-    const nPages = isDoc
-      ? Math.max(dDoc?.pages?.length ?? 0, vDoc?.pages?.length ?? 0, dMs.length, vMs.length, 1)
-      : 1;
+    const isTable = item.mode === 'table';
+    // Table mode is now page-by-page too: one heading + source image + that
+    // page's table per page (was: page-1 image + all pages' text stacked).
+    const nPages = itemPageCount(item);
     const imgByPage = new Map<number, CompareDocxPageImage>();
     (item.pageImages ?? []).forEach((pi) => imgByPage.set(pi.page, pi));
 
+    const tablePaged = isTable && nPages > 1;
     for (let i = 0; i < nPages; i++) {
-      const label = isDoc ? dMs[i]?.page ?? vMs[i]?.page ?? i + 1 : null;
-      children.push(para([text(isDoc ? `Page ${label}` : 'Result', { bold: true, size: 24 })], { spacing: 80, heading: HeadingLevel.HEADING_2 }));
+      const label = isDoc ? dMs[i]?.page ?? vMs[i]?.page ?? i + 1 : tablePaged ? i + 1 : null;
+      const heading = isDoc || tablePaged ? `Page ${label}` : 'Result';
+      children.push(para([text(heading, { bold: true, size: 24 })], { spacing: 80, heading: HeadingLevel.HEADING_2 }));
+
+      // Table mode: the source page image (plain), full width, once per page.
+      if (tablePaged) {
+        const pim = item.pageImages?.[i];
+        if (pim?.plain) {
+          const dispW = Math.min(460, pim.w || 460);
+          const dispH = pim.w > 0 ? Math.round((pim.h / pim.w) * dispW) : 300;
+          children.push(para([text('Source page', { italics: true, size: 16, color: '64748B' })], { spacing: 40 }));
+          children.push(new Paragraph({ children: [new ImageRun({ type: 'png', data: dataUrlToBytes(pim.plain), transformation: { width: dispW, height: dispH } })] }));
+        }
+      }
 
       // Per-page timing line.
       if (isDoc) {

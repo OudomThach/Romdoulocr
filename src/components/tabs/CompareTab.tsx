@@ -818,11 +818,12 @@ export function CompareTab() {
 
     const src = runPages[idx] ?? [];
     const firstPage = src[0] ?? 1;
+    const tableMulti = mode === 'table' && src.length > 1;
 
-    // Embed the source image for image inputs (OCR / Table / dataset rows), now
-    // including PDFs (rasterizes the first selected page). Document mode already
-    // shows per-page box images, so skip the standalone source there.
-    const sourceImage = mode === 'document' ? undefined : await sourceImageData(f, firstPage);
+    // Standalone source image for single-page image inputs (OCR / single-page
+    // table / dataset rows). Document mode shows per-page box images, and
+    // multi-page table now shows a source image PER PAGE below — skip both here.
+    const sourceImage = mode === 'document' || tableMulti ? undefined : await sourceImageData(f, firstPage);
 
     let pageImages: CompareDocxPageImage[] | undefined;
     if (mode === 'document' && r.default.data && r.vllm.data) {
@@ -841,19 +842,27 @@ export function CompareTab() {
           pageImages.push({ page: srcPage, w: (di ?? vi)!.w, h: (di ?? vi)!.h, default: di?.dataUrl, vllm: vi?.dataUrl });
         }
       }
+    } else if (tableMulti) {
+      // Multi-page table: page-by-page like document mode — one plain source
+      // image per selected page (cell boxes can't span pages in the merged
+      // result). The docx pairs pageImages[i] with that page's ## Page chunk.
+      pageImages = [];
+      const np = Math.min(src.length, MAX_BOX_PAGES);
+      for (let i = 0; i < np; i++) {
+        const bmp = await loadPageImage(f, src[i]);
+        if (!bmp) continue;
+        const pi = drawPlainImage(bmp);
+        (bmp as ImageBitmap).close?.();
+        if (pi) pageImages.push({ page: i + 1, w: pi.w, h: pi.h, plain: pi.dataUrl });
+      }
     }
 
-    // Table mode: draw each backend's detected CELL boxes over the source page.
-    // Only for single-page runs (multi-page stacks cells across pages, so their
-    // bboxes no longer share one image's coordinate space).
+    // Single-page table: draw each backend's detected CELL boxes over the page,
+    // falling back to the plain page image when a backend has no usable bboxes.
     let cellBoxes: CompareDocxItem['cellBoxes'];
     if (mode === 'table' && src.length <= 1 && r.default.data && r.vllm.data) {
       const bmp = await loadPageImage(f, firstPage);
       if (bmp) {
-        // Plain page image (no boxes) — the fallback when a backend returns no
-        // usable cell bboxes (e.g. Surya's full-page text fallback). Without it
-        // that backend's side renders blank and the doc looks like it "only has
-        // the first image".
         const plain = drawPlainImage(bmp);
         const di = drawTableCells(bmp, r.default.data as TableResult) ?? plain;
         const vi = drawTableCells(bmp, r.vllm.data as TableResult) ?? plain;
