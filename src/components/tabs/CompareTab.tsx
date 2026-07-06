@@ -544,23 +544,24 @@ export function CompareTab() {
     }
   };
 
-  // Batch: run all files with bounded concurrency. vLLM does continuous
-  // batching (max-num-seqs 6), so a few in flight is ~2-2.5x faster than
-  // sequential and safe; Modal auto-scales. Cap at 4 items (= 4 vLLM + 4 Cloud).
-  const runAll = async () => {
-    if (!files.length) return;
+  // Batch over a specific list of file indices with bounded concurrency. vLLM
+  // does continuous batching (max-num-seqs 6), so a few in flight is ~2-2.5x
+  // faster than sequential and safe; Modal auto-scales. Cap at 4 items
+  // (= 4 vLLM + 4 Cloud).
+  const runIndices = async (idxs: number[]) => {
+    if (!idxs.length) return;
     setRunning(true);
-    setProgress({ done: 0, total: files.length });
+    setProgress({ done: 0, total: idxs.length });
     let done = 0;
-    let next = 0;
-    const CAP = Math.min(4, files.length);
+    let cursor = 0;
+    const CAP = Math.min(4, idxs.length);
     const worker = async () => {
-      while (next < files.length) {
-        const i = next++;
+      while (cursor < idxs.length) {
+        const i = idxs[cursor++];
         const r = await runPair(files[i], i);
         setResults((prev) => ({ ...prev, [i]: r }));
         done += 1;
-        setProgress({ done, total: files.length });
+        setProgress({ done, total: idxs.length });
       }
     };
     try {
@@ -571,8 +572,13 @@ export function CompareTab() {
       setStage(null);
       setDocProg(null);
     }
-    toast.success(`Ran ${files.length} comparison(s)`);
+    toast.success(`Ran ${idxs.length} comparison(s)`);
   };
+
+  const runAll = () => runIndices(files.map((_, i) => i));
+  // Only the files that haven't completed yet — so a partial batch (some items
+  // failed / were interrupted) finishes without re-running the whole set.
+  const runRemaining = () => runIndices(files.map((_, i) => i).filter((i) => !paneOk(results[i])));
 
   const onVote = (choice: Choice) => {
     setVotes((prev) => ({ ...prev, [activeIdx]: choice }));
@@ -1072,6 +1078,13 @@ export function CompareTab() {
           {multi && (
             <button type="button" className="btn-secondary" disabled={running} onClick={runAll}>
               Run all ({files.length})
+            </button>
+          )}
+          {/* Finish a partial batch: only the items that didn't complete, so a
+              handful of failures don't force re-running all 2000. */}
+          {multi && doneIdxs.length > 0 && doneIdxs.length < files.length && (
+            <button type="button" className="btn-secondary" disabled={running} onClick={runRemaining}>
+              Run remaining ({files.length - doneIdxs.length})
             </button>
           )}
           {progress || stage || docProg ? (
