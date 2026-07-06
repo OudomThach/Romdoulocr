@@ -20,6 +20,7 @@ service when the user flips the backend toggle to "vLLM" (-> /api-vllm).
 
 from __future__ import annotations
 
+import hmac
 import os
 import re
 from typing import Any
@@ -41,11 +42,27 @@ TIMEOUT = httpx.Timeout(connect=15.0, read=600.0, write=600.0, pool=600.0)
 
 app = FastAPI(title="khparser → vLLM adapter", version="1.0.0")
 
-# CORS: the hosted SPA (Netlify) calls this adapter DIRECTLY via a public
-# tunnel URL — a cross-origin request. Same-origin nginx proxying (the home
-# deployment) is unaffected. CORS is a browser gate, not auth; anyone with the
-# tunnel URL can curl regardless, so "*" costs nothing extra. If GPU abuse ever
-# shows up, add a shared-secret header check here.
+# Shared-secret gate. When ADAPTER_TOKEN is set (public deployment behind a
+# Tailscale Funnel), every request must carry a matching `X-Adapter-Token`
+# header or gets 401 — so a naked GPU endpoint on the internet can't be abused
+# even if someone finds the funnel URL. Left UNSET for the home/nginx
+# deployment (same private network), where no gate is needed.
+ADAPTER_TOKEN = os.environ.get("ADAPTER_TOKEN", "").strip()
+
+
+@app.middleware("http")
+async def _require_token(request: Request, call_next):
+    if ADAPTER_TOKEN and request.method != "OPTIONS":
+        # Constant-time compare to avoid leaking the token via timing.
+        supplied = request.headers.get("x-adapter-token", "")
+        if not hmac.compare_digest(supplied, ADAPTER_TOKEN):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+# CORS: only relevant if a browser ever calls the adapter cross-origin. In the
+# secure setup the caller is a same-origin Netlify Function (server-side), so
+# this is belt-and-suspenders; the token above is the real gate.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

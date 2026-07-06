@@ -45,9 +45,15 @@ COPY nginx.conf /etc/nginx/templates/spa.conf.template
 ARG API_UPSTREAM=https://rinabuoy13--khparser-api.modal.run
 ENV API_UPSTREAM=$API_UPSTREAM
 
-# Render the template into nginx's conf.d. Using a single explicit var name
-# in envsubst avoids accidentally rewriting nginx's own $variables.
-RUN envsubst '${API_UPSTREAM}' < /etc/nginx/templates/spa.conf.template \
+# Optional shared secret for the local vLLM adapter (empty by default). Baked
+# into the nginx config so the home deployment forwards it; the value comes from
+# the gitignored .env via docker-compose, never from the repo.
+ARG ADAPTER_TOKEN=
+ENV ADAPTER_TOKEN=$ADAPTER_TOKEN
+
+# Render the template into nginx's conf.d. Only our explicit vars are
+# substituted so nginx's own $variables are left intact.
+RUN envsubst '${API_UPSTREAM} ${ADAPTER_TOKEN}' < /etc/nginx/templates/spa.conf.template \
               > /etc/nginx/conf.d/spa.conf \
  && rm -rf /etc/nginx/templates
 

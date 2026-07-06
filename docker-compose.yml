@@ -25,6 +25,9 @@ services:
       dockerfile: Dockerfile
       args:
         API_UPSTREAM: ${API_UPSTREAM:-https://rinabuoy13--khparser-api.modal.run}
+        # Forwarded to the vLLM adapter (must match the adapter's ADAPTER_TOKEN).
+        # From the gitignored .env; empty when unset (no gate).
+        ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
     image: khmer-parser-ui:latest
     container_name: khmer-parser-ui
     restart: unless-stopped

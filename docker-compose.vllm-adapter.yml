@@ -23,6 +23,9 @@ services:
     environment:
       # Flask vLLM OCR app, reachable by container name on the surya network.
       SURYA_FLASK_URL: ${SURYA_FLASK_URL:-http://surya-container-vllm:8501}
+      # Shared secret required on every request when set (public Funnel
+      # exposure). Read from a gitignored root .env; UNSET = no gate (home).
+      ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
     ports:
       - "${VLLM_ADAPTER_PORT:-8090}:8090"
     networks:
