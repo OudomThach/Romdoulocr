@@ -764,6 +764,26 @@ export function CompareTab() {
     return drawn > 0 ? { dataUrl: c.toDataURL('image/png'), w: cw, h: ch } : null;
   };
 
+  // The page image with NO boxes → PNG data-URL, sized like drawTableCells so
+  // both sides of the "detected cells" two-column line up. Used as the fallback
+  // for a backend whose table result has no drawable cell bboxes.
+  const drawPlainImage = (
+    bmp: HTMLImageElement | ImageBitmap,
+    maxDim = 1000,
+  ): { dataUrl: string; w: number; h: number } | null => {
+    const { w: bw, h: bh } = bmpDims(bmp);
+    const scale = Math.min(1, maxDim / Math.max(bw || 1, bh || 1));
+    const cw = Math.max(1, Math.round((bw || 1) * scale));
+    const ch = Math.max(1, Math.round((bh || 1) * scale));
+    const c = document.createElement('canvas');
+    c.width = cw;
+    c.height = ch;
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(bmp, 0, 0, cw, ch);
+    return { dataUrl: c.toDataURL('image/png'), w: cw, h: ch };
+  };
+
   // A downscaled PNG of the source image (+ dims) to embed in the docx. Handles
   // PDFs (rasterizes the given page) as well as image files.
   const sourceImageData = async (
@@ -830,8 +850,13 @@ export function CompareTab() {
     if (mode === 'table' && src.length <= 1 && r.default.data && r.vllm.data) {
       const bmp = await loadPageImage(f, firstPage);
       if (bmp) {
-        const di = drawTableCells(bmp, r.default.data as TableResult);
-        const vi = drawTableCells(bmp, r.vllm.data as TableResult);
+        // Plain page image (no boxes) — the fallback when a backend returns no
+        // usable cell bboxes (e.g. Surya's full-page text fallback). Without it
+        // that backend's side renders blank and the doc looks like it "only has
+        // the first image".
+        const plain = drawPlainImage(bmp);
+        const di = drawTableCells(bmp, r.default.data as TableResult) ?? plain;
+        const vi = drawTableCells(bmp, r.vllm.data as TableResult) ?? plain;
         (bmp as ImageBitmap).close?.();
         if (di || vi) cellBoxes = { w: (di ?? vi)!.w, h: (di ?? vi)!.h, default: di?.dataUrl, vllm: vi?.dataUrl };
       }
