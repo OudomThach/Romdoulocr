@@ -1,15 +1,13 @@
 # Netlify config for the hosted (public, guest-facing) build.
 #
-# Backends on the hosted site:
-#   - Default (Khmer Parsing API): same-origin redirect below (the Modal
-#     upstream sends no CORS headers, so it must be proxied).
-#   - vLLM (your home GPU): the SPA calls /api-vllm/* which is handled by the
-#     serverless function netlify/functions/vllm.mjs. That function forwards to
-#     your Tailscale Funnel using two SERVER-SIDE secrets — never in the bundle:
-#         VLLM_FUNNEL_URL  e.g. https://apt-server-desktop.tail806605.ts.net
-#         ADAPTER_TOKEN    the shared secret the adapter checks
-#     Set BOTH in the Netlify dashboard → Site settings → Environment variables
-#     (do NOT commit them here). If unset, the vLLM badge just shows offline.
+# Both backends are reached DIRECTLY at the home machine via the Tailscale
+# Funnel (browser → funnel → home nginx → Modal / vLLM adapter). This bypasses
+# Netlify's 26s proxy timeout, which real OCR (30-60s) exceeds. nginx allows
+# 300s and adds the adapter token server-side, so no secret ships in the bundle.
+#
+# The funnel hostname is public (not a secret), so it lives here. Requires the
+# funnel to expose the nginx container: `tailscale funnel --bg 8181`. When the
+# PC is off the site can't reach either backend (accepted trade-off).
 
 [build]
   command = "npm run build"
@@ -17,15 +15,11 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  VITE_API_URL = "https://apt-server-desktop.tail806605.ts.net/api"
+  VITE_VLLM_URL = "https://apt-server-desktop.tail806605.ts.net/api-vllm"
 
-# Default backend — same-origin proxy to the Khmer Parsing API.
-[[redirects]]
-  from = "/api/*"
-  to = "https://rinabuoy13--khparser-api.modal.run/:splat"
-  status = 200
-
-# SPA fallback — serve index.html for any unknown path. (The vLLM function
-# claims /api-vllm/* via its own config.path, so it is matched before this.)
+# SPA fallback — serve index.html for any unknown path. (No /api proxy here
+# anymore; the SPA calls the funnel directly at the absolute URLs above.)
 [[redirects]]
   from = "/*"
   to = "/index.html"
