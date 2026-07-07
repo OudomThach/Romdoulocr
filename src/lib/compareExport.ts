@@ -35,7 +35,7 @@ function boxesBlock(data: PaneData, imgDataUrl: string): string {
 function columnsHtml(mode: CompareRecord['mode'], panes: CompareRecord['panes'], imgDataUrl?: string): string {
   return panes
     .map((p) => {
-      const name = p.backend === 'vllm' ? 'Surya OCR 2 · vLLM' : 'Khmer Parsing API';
+      const name = p.backend === 'vllm' ? 'Surya OCR 2 · vLLM' : p.backend === 'lens' ? 'Google Lens' : 'Khmer Parsing API';
       const boxes = mode === 'document' && imgDataUrl ? boxesBlock(p.data, imgDataUrl) : '';
       const md = paneMarkdown(mode, p.data);
       return `<section class="col"><h2>${esc(name)} <span class="ms">${(p.ms / 1000).toFixed(1)}s</span></h2>${boxes}<pre>${esc(md)}</pre></section>`;
@@ -48,7 +48,7 @@ body{font-family:'Segoe UI','Noto Sans Khmer',system-ui,sans-serif;margin:24px;c
 h1{font-size:18px;margin:0 0 4px}.meta{color:#64748b;font-size:13px;margin-bottom:16px}
 .item{margin:0 0 26px;padding:0 0 22px;border-bottom:1px solid #e2e8f0}
 .itemtitle{font-size:15px;margin:0 0 10px}.itemtitle .pref{font-size:12px;color:#64748b;font-weight:400}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;align-items:start}
 .col h2{font-size:15px;margin:0 0 8px;display:flex;align-items:center;gap:8px}
 .col h2 .ms{font-size:12px;color:#64748b;font-weight:400}
 .imgwrap{position:relative;width:100%;border:1px solid #cbd5e1;border-radius:8px;overflow:hidden;background:#0a0b12;margin-bottom:10px}

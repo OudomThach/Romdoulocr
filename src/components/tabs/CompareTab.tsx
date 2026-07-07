@@ -840,10 +840,13 @@ export function CompareTab() {
   };
 
   const buildDocxItem = async (f: File, idx: number, r: RunResult): Promise<CompareDocxItem> => {
-    const panes: CompareDocxItem['panes'] = [
-      { backend: 'default', ms: r.default.ms, data: r.default.data as CompareDocxItem['panes'][number]['data'], pageMs: r.default.pageMs, error: r.default.error },
-      { backend: 'vllm', ms: r.vllm.ms, data: r.vllm.data as CompareDocxItem['panes'][number]['data'], pageMs: r.vllm.pageMs, error: r.vllm.error },
-    ];
+    const panes: CompareDocxItem['panes'] = PANES.map((b) => ({
+      backend: b,
+      ms: r[b].ms,
+      data: r[b].data as CompareDocxItem['panes'][number]['data'],
+      pageMs: r[b].pageMs,
+      error: r[b].error,
+    }));
 
     const src = runPages[idx] ?? [];
     const firstPage = src[0] ?? 1;

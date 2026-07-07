@@ -89,7 +89,7 @@ function ComparePaneView({ mode, data }: { mode: CompareRecord['mode']; data: Co
 }
 
 function CompareResultDetail({ result }: { result: CompareRecord }) {
-  const label = (b: string) => (b === 'vllm' ? 'Surya OCR 2 · vLLM' : 'Khmer Parsing API');
+  const label = (b: string) => (b === 'vllm' ? 'Surya OCR 2 · vLLM' : b === 'lens' ? 'Google Lens' : 'Khmer Parsing API');
   return (
     <div className="grid gap-3">
       <div className="text-xs text-slate-400">
@@ -99,7 +99,7 @@ function CompareResultDetail({ result }: { result: CompareRecord }) {
       {result.sourcePreview && (
         <img src={result.sourcePreview} alt="source" className="max-h-44 w-auto rounded-lg border border-slate-200" />
       )}
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {result.panes.map((p, i) => (
           <div key={i} className="rounded-lg border border-slate-200 p-2.5">
             <div className="mb-1.5 text-xs font-semibold text-slate-950">

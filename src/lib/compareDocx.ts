@@ -21,7 +21,7 @@ const KH = 'Noto Sans Khmer';
 export type CompareMode = 'ocr' | 'table' | 'document';
 
 export interface CompareDocxPane {
-  backend: 'default' | 'vllm';
+  backend: 'default' | 'vllm' | 'lens';
   ms: number;
   data?: DocumentResult | OcrImageResponse | TableResult;
   pageMs?: { page: number; ms: number }[];
@@ -64,8 +64,6 @@ export function buildGroundTruthTxt(items: CompareDocxItem[], generatedAt: strin
     '',
   ];
   items.forEach((it, i) => {
-    const d = paneOf(it, 'default');
-    const v = paneOf(it, 'vllm');
     lines.push(`==================== ${i + 1}. ${it.filename} ====================`);
     lines.push('');
     lines.push('[Ground truth]');
@@ -73,17 +71,20 @@ export function buildGroundTruthTxt(items: CompareDocxItem[], generatedAt: strin
     lines.push('');
     const withCer = (pane?: CompareDocxPane) =>
       it.groundTruth && pane?.data ? ` (CER ${pct(cer(it.groundTruth, paneText(it.mode, pane.data)))})` : '';
-    lines.push(`[Khmer Parsing API]${withCer(d)}`);
-    lines.push((d?.error ? `Error: ${d.error}` : paneText(it.mode, d?.data)).trim() || '(empty)');
-    lines.push('');
-    lines.push(`[Surya OCR 2]${withCer(v)}`);
-    lines.push((v?.error ? `Error: ${v.error}` : paneText(it.mode, v?.data)).trim() || '(empty)');
-    lines.push('');
+    for (const p of it.panes) {
+      lines.push(`[${BACKEND_NAME[p.backend]}]${withCer(p)}`);
+      lines.push((p.error ? `Error: ${p.error}` : paneText(it.mode, p.data)).trim() || '(empty)');
+      lines.push('');
+    }
   });
   return lines.join('\n');
 }
 
-const BACKEND_NAME: Record<'default' | 'vllm', string> = { default: 'Khmer Parsing API', vllm: 'Surya OCR 2' };
+const BACKEND_NAME: Record<'default' | 'vllm' | 'lens', string> = {
+  default: 'Khmer Parsing API',
+  vllm: 'Surya OCR 2',
+  lens: 'Google Lens',
+};
 
 function secs(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`;
@@ -101,7 +102,7 @@ function usabilityVerdict(meanCer: number): string {
   return meanCer <= 0.05 ? 'production-ready' : meanCer <= 0.15 ? 'usable with review' : 'not usable';
 }
 
-function paneOf(item: CompareDocxItem, backend: 'default' | 'vllm'): CompareDocxPane | undefined {
+function paneOf(item: CompareDocxItem, backend: 'default' | 'vllm' | 'lens'): CompareDocxPane | undefined {
   return item.panes.find((p) => p.backend === backend);
 }
 
@@ -200,15 +201,12 @@ function jsonForPane(pane: CompareDocxPane | undefined, cap = 6000): string {
 export function buildOutputsJson(items: CompareDocxItem[], generatedAt: string): string {
   const payload = {
     generated: generatedAt,
-    backends: { default: 'Khmer Parsing API', vllm: 'Surya OCR 2' },
+    backends: Object.fromEntries((items[0]?.panes ?? []).map((p) => [p.backend, BACKEND_NAME[p.backend]])),
     items: items.map((it) => ({
       filename: it.filename,
       mode: it.mode,
       groundTruth: it.groundTruth ?? null,
-      outputs: {
-        default: stripBase64(paneOf(it, 'default')?.data ?? paneOf(it, 'default')?.error ?? null),
-        vllm: stripBase64(paneOf(it, 'vllm')?.data ?? paneOf(it, 'vllm')?.error ?? null),
-      },
+      outputs: Object.fromEntries(it.panes.map((p) => [p.backend, stripBase64(p.data ?? p.error ?? null)])),
     })),
   };
   return JSON.stringify(payload, null, 2);
@@ -304,6 +302,24 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
         }),
       ],
     });
+
+  // N equal columns with header labels — the 3-engine generalization of twoCol.
+  const multiCol = (cols: { label: string; blocks: Block[] }[]) => {
+    const pctW = Math.floor(100 / Math.max(1, cols.length));
+    return new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: allBorders,
+      rows: [
+        new TableRow({
+          tableHeader: true,
+          children: cols.map((c) => textCell([text(c.label, { bold: true, size: 18 })], { fill: 'E2E8F0' })),
+        }),
+        new TableRow({
+          children: cols.map((c) => new TableCell({ width: { size: pctW, type: WidthType.PERCENTAGE }, margins: { top: 60, bottom: 60, left: 100, right: 100 }, children: endsWithParagraph(c.blocks) })),
+        }),
+      ],
+    });
+  };
 
   const imagePara = (url: string | undefined, w: number, h: number): Par => {
     if (!url) return new Paragraph({ children: [text('(no image)', { italics: true, color: '94A3B8' })] });
@@ -454,7 +470,12 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
   const children: Child[] = [];
 
   children.push(para([text('Backend Comparison — Benchmark Report', { bold: true, size: 32 })]));
-  children.push(para([text(`Generated ${opts.generatedAt} · ${opts.items.length} item(s) · Khmer Parsing API vs Surya OCR 2 (vLLM)`, { size: 18, color: '64748B' })], { spacing: 200 }));
+  children.push(
+    para(
+      [text(`Generated ${opts.generatedAt} · ${opts.items.length} item(s) · ${(opts.items[0]?.panes ?? []).map((p) => BACKEND_NAME[p.backend]).join(' vs ')}`, { size: 18, color: '64748B' })],
+      { spacing: 200 },
+    ),
+  );
 
   // --- aggregate scorecard (only when we have ground-truth labels) ----------
   const labeled = opts.items.filter((it) => it.groundTruth && it.groundTruth.trim().length > 0);
@@ -462,26 +483,26 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
   if (labeled.length > 0 || multiItem) {
     // Collect per-item CER + latency for each backend so we can report real
     // aggregates (mean/median/spread), not just a single average.
-    const cersD: number[] = [];
-    const cersV: number[] = [];
-    const msD: number[] = [];
-    const msV: number[] = [];
-    let winD = 0;
-    let winV = 0;
+    // Per-backend aggregates across all items (mean/median/spread/wins/speed).
+    // Iterates every engine present in the report — 2 or 3.
+    const ORDER: ('default' | 'vllm' | 'lens')[] = ['default', 'vllm', 'lens'];
+    const stats = ORDER.map((b) => ({ b, name: BACKEND_NAME[b], cers: [] as number[], ms: [] as number[], wins: 0 }));
     let tie = 0;
     for (const it of opts.items) {
-      const d = paneOf(it, 'default');
-      const v = paneOf(it, 'vllm');
-      if (d && d.data) msD.push(d.ms);
-      if (v && v.data) msV.push(v.ms);
-      if (it.groundTruth && it.groundTruth.trim()) {
-        const cd = cer(it.groundTruth, paneText(it.mode, d?.data));
-        const cv = cer(it.groundTruth, paneText(it.mode, v?.data));
-        cersD.push(cd);
-        cersV.push(cv);
-        if (cv < cd) winV++;
-        else if (cd < cv) winD++;
-        else tie++;
+      const isLabeled = !!(it.groundTruth && it.groundTruth.trim());
+      const itemCers: number[] = [];
+      stats.forEach((s) => {
+        const pane = paneOf(it, s.b);
+        if (pane && pane.data) s.ms.push(pane.ms);
+        const c = isLabeled ? cer(it.groundTruth!, paneText(it.mode, pane?.data)) : Infinity;
+        itemCers.push(c);
+        if (isLabeled && pane) s.cers.push(c);
+      });
+      if (isLabeled) {
+        const min = Math.min(...itemCers);
+        const winners = stats.filter((_, k) => itemCers[k] === min);
+        winners.forEach((s) => (s.wins += 1));
+        if (winners.length > 1) tie += 1;
       }
     }
     const aggStats = (xs: number[]) => {
@@ -499,47 +520,35 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
     const cerCell = (c: number) => [text(pct(c), { color: cerColor(c) })];
     const rateCell = (r: number) => [text(pct(r), { color: rateColor(r) })];
 
-    const sD = aggStats(cersD);
-    const sV = aggStats(cersV);
+    const agg = stats.map((s) => ({ ...s, st: aggStats(s.cers) }));
+    const labeledAgg = agg.filter((a) => a.st) as (typeof agg[number] & { st: NonNullable<(typeof agg)[number]['st']> })[];
+    const nLbl = labeled.length;
 
-    // Plain-English verdict up top — the thing most readers actually want.
-    if (sD && sV) {
-      children.push(
-        para(
-          [
-            text('Verdict: ', { bold: true, size: 20 }),
-            text(`${BACKEND_NAME.default} is `, { size: 18 }),
-            text(usabilityVerdict(sD.mean), { bold: true, size: 18, color: cerColor(sD.mean) }),
-            text(` (mean CER ${pct(sD.mean)}, ${pct(sD.perfect)} perfect). ${BACKEND_NAME.vllm} is `, { size: 18 }),
-            text(usabilityVerdict(sV.mean), { bold: true, size: 18, color: cerColor(sV.mean) }),
-            text(` (mean CER ${pct(sV.mean)}, ${pct(sV.perfect)} perfect).`, { size: 18 }),
-          ],
-          { spacing: 160 },
-        ),
-      );
+    // Plain-English verdict up top — one clause per engine.
+    if (labeledAgg.length) {
+      const runs = [text('Verdict: ', { bold: true, size: 20 })];
+      labeledAgg.forEach((a, i) => {
+        runs.push(text(`${a.name} is `, { size: 18 }));
+        runs.push(text(usabilityVerdict(a.st.mean), { bold: true, size: 18, color: cerColor(a.st.mean) }));
+        runs.push(text(` (mean CER ${pct(a.st.mean)}, ${pct(a.st.perfect)} perfect).${i < labeledAgg.length - 1 ? ' ' : ''}`, { size: 18 }));
+      });
+      children.push(para(runs, { spacing: 160 }));
     }
 
     children.push(para([text('Summary scorecard', { bold: true, size: 24 })], { spacing: 120, heading: HeadingLevel.HEADING_2 }));
 
-    if (sD && sV) {
-      const n = cersD.length;
-      const leader = sD.mean <= sV.mean ? BACKEND_NAME.default : BACKEND_NAME.vllm;
+    if (labeledAgg.length) {
+      const leader = [...labeledAgg].sort((a, b) => a.st.mean - b.st.mean)[0].name;
       children.push(
         para(
-          [
-            text(`${leader} leads on accuracy`, { bold: true, size: 18 }),
-            text(`  ·  ${n} labeled samples · ties ${tie}`, { size: 16, color: '64748B' }),
-          ],
+          [text(`${leader} leads on accuracy`, { bold: true, size: 18 }), text(`  ·  ${nLbl} labeled samples · ties ${tie}`, { size: 16, color: '64748B' })],
           { spacing: 80 },
         ),
       );
       children.push(
         gridTable(
           ['Backend', 'Mean CER', 'Median CER', 'Perfect (CER 0)', 'Usable (≤10%)', 'Worst CER', 'Wins'],
-          [
-            [[text(BACKEND_NAME.default, { bold: true })], cerCell(sD.mean), cerCell(sD.median), rateCell(sD.perfect), rateCell(sD.usable), cerCell(sD.worst), [text(`${winD} / ${n}`)]],
-            [[text(BACKEND_NAME.vllm, { bold: true })], cerCell(sV.mean), cerCell(sV.median), rateCell(sV.perfect), rateCell(sV.usable), cerCell(sV.worst), [text(`${winV} / ${n}`)]],
-          ],
+          labeledAgg.map((a) => [[text(a.name, { bold: true })], cerCell(a.st.mean), cerCell(a.st.median), rateCell(a.st.perfect), rateCell(a.st.usable), cerCell(a.st.worst), [text(`${a.wins} / ${nLbl}`)]]),
         ),
       );
       children.push(
@@ -557,18 +566,16 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
         b25: xs.filter((c) => c > 0.1 && c <= 0.25).length,
         hi: xs.filter((c) => c > 0.25).length,
       });
-      const bD = buckets(cersD);
-      const bV = buckets(cersV);
       const hiCell = (k: number) => [text(String(k), k ? { color: 'B91C1C', bold: true } : {})];
       const okCell = (k: number) => [text(String(k), k ? { color: '15803D' } : {})];
       children.push(para([text('CER distribution (# of samples)', { bold: true, size: 18 })], { spacing: 100 }));
       children.push(
         gridTable(
           ['Backend', 'Perfect', '≤5%', '≤10%', '≤25%', '>25% (failed)'],
-          [
-            [[text(BACKEND_NAME.default, { bold: true })], okCell(bD.perfect), [text(String(bD.b5))], [text(String(bD.b10))], [text(String(bD.b25))], hiCell(bD.hi)],
-            [[text(BACKEND_NAME.vllm, { bold: true })], okCell(bV.perfect), [text(String(bV.b5))], [text(String(bV.b10))], [text(String(bV.b25))], hiCell(bV.hi)],
-          ],
+          labeledAgg.map((a) => {
+            const bk = buckets(a.cers);
+            return [[text(a.name, { bold: true })], okCell(bk.perfect), [text(String(bk.b5))], [text(String(bk.b10))], [text(String(bk.b25))], hiCell(bk.hi)];
+          }),
         ),
       );
       children.push(para([text(' ')], { spacing: 120 }));
@@ -579,10 +586,7 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
       children.push(
         gridTable(
           ['Backend', 'Items', 'Avg / item', 'Total time'],
-          [
-            [[text(BACKEND_NAME.default, { bold: true })], [text(String(msD.length))], [text(secs(mean(msD)))], [text(secs(total(msD)))]],
-            [[text(BACKEND_NAME.vllm, { bold: true })], [text(String(msV.length))], [text(secs(mean(msV)))], [text(secs(total(msV)))]],
-          ],
+          agg.map((a) => [[text(a.name, { bold: true })], [text(String(a.ms.length))], [text(secs(mean(a.ms)))], [text(secs(total(a.ms)))]]),
         ),
       );
       children.push(para([text(' ')], { spacing: 160 }));
@@ -660,11 +664,9 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
       return cells;
     };
     children.push(para([text('Summary', { bold: true, size: 22 })], { spacing: 80, heading: HeadingLevel.HEADING_2 }));
-    children.push(gridTable(summaryHeader, [summaryRow(d), summaryRow(v)]));
+    children.push(gridTable(summaryHeader, item.panes.map((p) => summaryRow(p))));
 
-    // --- PAGE BY PAGE: page 1 (both engines) → page 2 → … -------------------
-    const dDoc = d?.data as DocumentResult | undefined;
-    const vDoc = v?.data as DocumentResult | undefined;
+    // --- PAGE BY PAGE: page 1 (all engines) → page 2 → … --------------------
     const dMs = d?.pageMs ?? [];
     const vMs = v?.pageMs ?? [];
     const isDoc = item.mode === 'document';
@@ -692,25 +694,17 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
         }
       }
 
-      // Per-page timing line.
+      // Per-page timing line — one clause per engine.
       if (isDoc) {
-        const dm = dMs[i]?.ms;
-        const vm = vMs[i]?.ms;
-        const dreg = dDoc?.pages?.[i]?.regions?.length;
-        const vreg = vDoc?.pages?.[i]?.regions?.length;
-        const faster = dm != null && vm != null ? (dm <= vm ? BACKEND_NAME.default : BACKEND_NAME.vllm) : '—';
-        children.push(
-          para(
-            [
-              text(`${BACKEND_NAME.default} `, { bold: true, size: 18 }),
-              text(`${dm != null ? secs(dm) : '—'} · ${dreg ?? '—'} regions`, { size: 18 }),
-              text(`      ${BACKEND_NAME.vllm} `, { bold: true, size: 18 }),
-              text(`${vm != null ? secs(vm) : '—'} · ${vreg ?? '—'} regions`, { size: 18 }),
-              text(`      · faster: ${faster}`, { size: 16, color: '64748B' }),
-            ],
-            { spacing: 80 },
-          ),
-        );
+        const runs: Run[] = [];
+        item.panes.forEach((p, k) => {
+          const pm = p.pageMs?.[i]?.ms;
+          const preg = (p.data as DocumentResult | undefined)?.pages?.[i]?.regions?.length;
+          if (k > 0) runs.push(text('      ', { size: 18 }));
+          runs.push(text(`${BACKEND_NAME[p.backend]} `, { bold: true, size: 18 }));
+          runs.push(text(`${pm != null ? secs(pm) : '—'} · ${preg ?? '—'} regions`, { size: 18 }));
+        });
+        children.push(para(runs, { spacing: 80 }));
       }
 
       // Boxes side by side (document mode, when images were generated).
@@ -720,10 +714,8 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
         children.push(twoCol([imagePara(pim.default, pim.w, pim.h)], [imagePara(pim.vllm, pim.w, pim.h)]));
       }
 
-      // Markdown side by side — the readable text comparison for this page.
-      // Pipe tables are rendered as real Word tables, not raw "| … |" text.
-      const dMd = columnMarkdown(item, d, i);
-      const vMd = columnMarkdown(item, v, i);
+      // Per-engine markdown for this page (pipe tables → real Word tables).
+      const mdByPane = item.panes.map((p) => columnMarkdown(item, p, i));
 
       // For labeled items (dataset rows), show the per-character DIFF vs the
       // ground truth instead — you see exactly what each engine got wrong.
@@ -739,19 +731,16 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
           ),
         );
         children.push(
-          twoCol(
-            diffParas(diffChars(item.groundTruth!, paneText(item.mode, d?.data))),
-            diffParas(diffChars(item.groundTruth!, paneText(item.mode, v?.data))),
-          ),
+          multiCol(item.panes.map((p) => ({ label: BACKEND_NAME[p.backend], blocks: diffParas(diffChars(item.groundTruth!, paneText(item.mode, p.data))) }))),
         );
       } else {
         children.push(para([text('Extracted text', { italics: true, size: 16, color: '64748B' })], { spacing: 40 }));
-        children.push(twoCol(markdownToBlocks(dMd), markdownToBlocks(vMd)));
+        children.push(multiCol(item.panes.map((p, k) => ({ label: BACKEND_NAME[p.backend], blocks: markdownToBlocks(mdByPane[k]) }))));
       }
 
       // Raw markdown source for each engine, verbatim — copy/paste friendly.
       children.push(para([text('Markdown (source)', { italics: true, size: 16, color: '64748B' })], { spacing: 40 }));
-      children.push(twoCol(rawMarkdownBlocks(dMd), rawMarkdownBlocks(vMd)));
+      children.push(multiCol(item.panes.map((p, k) => ({ label: BACKEND_NAME[p.backend], blocks: rawMarkdownBlocks(mdByPane[k]) }))));
 
       // Breathing room before the next page.
       children.push(para([text(' ')], { spacing: 120 }));
@@ -767,7 +756,7 @@ export async function buildCompareDocx(opts: { items: CompareDocxItem[]; generat
         { spacing: 40 },
       ),
     );
-    children.push(twoCol(rawMarkdownBlocks(jsonForPane(d)), rawMarkdownBlocks(jsonForPane(v))));
+    children.push(multiCol(item.panes.map((p) => ({ label: BACKEND_NAME[p.backend], blocks: rawMarkdownBlocks(jsonForPane(p)) }))));
     children.push(para([text(' ')], { spacing: 120 }));
 
     if (idx < opts.items.length - 1) {
