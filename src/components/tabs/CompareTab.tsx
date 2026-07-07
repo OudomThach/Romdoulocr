@@ -29,7 +29,7 @@ import type { ComparePane, CompareRecord } from '@/lib/storage';
  * scope for now — this is human-judged.
  */
 type Mode = 'ocr' | 'table' | 'document';
-type Choice = 'default' | 'tie' | 'vllm';
+type Choice = CmpBackend | 'tie';
 
 interface Pane {
   ms: number;
@@ -38,10 +38,11 @@ interface Pane {
   /** Per-page latency (document mode runs each page as its own timed request). */
   pageMs?: { page: number; ms: number }[];
 }
-interface RunResult {
-  default: Pane;
-  vllm: Pane;
-}
+// The three engines Compare pits against each other. Ordered — layout, panes
+// and exports all iterate this so adding/removing an engine is one edit here.
+type CmpBackend = 'default' | 'vllm' | 'lens';
+const PANES: CmpBackend[] = ['default', 'vllm', 'lens'];
+type RunResult = Record<CmpBackend, Pane>;
 
 const MODES: { id: Mode; label: string }[] = [
   { id: 'ocr', label: 'OCR image' },
@@ -49,7 +50,11 @@ const MODES: { id: Mode; label: string }[] = [
   { id: 'document', label: 'Document' },
 ];
 
-const BACKEND_NAME: Record<'default' | 'vllm', string> = { default: 'Khmer Parsing API', vllm: 'Surya OCR 2 · vLLM' };
+const BACKEND_NAME: Record<CmpBackend, string> = {
+  default: 'Khmer Parsing API',
+  vllm: 'Surya OCR 2 · vLLM',
+  lens: 'Google Lens',
+};
 
 // DPI used to rasterize selected PDF pages before sending. Both backends get
 // the SAME pixels (fairer than letting each rasterize the PDF its own way), and
@@ -76,7 +81,7 @@ function readTally(): Tally {
 }
 function bumpTally(mode: Mode, choice: Choice): Tally {
   const t = readTally();
-  const m = t[mode] ?? { default: 0, tie: 0, vllm: 0 };
+  const m = t[mode] ?? { default: 0, tie: 0, vllm: 0, lens: 0 };
   m[choice] += 1;
   t[mode] = m;
   try {
@@ -129,6 +134,7 @@ function preferredLabel(vote: Choice | null): string | undefined {
 
 /** Plain extracted text for a result, used to score against ground truth. */
 function textOf(mode: Mode, data: unknown): string {
+  if (!data) return ''; // errored / not-run pane (e.g. Lens offline) → empty
   // Blank-aware: full_text can arrive as "" — fall back to region text so
   // scoring/exports don't see an empty document.
   if (mode === 'document') {
@@ -216,7 +222,7 @@ export function CompareTab() {
   const [stage, setStage] = useState<Stage | null>(null);
   // Per-backend page progress during document-mode runs (each page is its own
   // timed request, so we can show "Cloud 3/10 · vLLM 2/10" live).
-  const [docProg, setDocProg] = useState<{ default: number; vllm: number; total: number } | null>(null);
+  const [docProg, setDocProg] = useState<({ total: number } & Partial<Record<CmpBackend, number>>) | null>(null);
   const [exporting, setExporting] = useState(false);
   // PDF page handling (document mode): total page count + the user's chosen
   // range string + the page numbers actually sent on the last run, all keyed by
@@ -229,21 +235,23 @@ export function CompareTab() {
   const [votes, setVotes] = useState<Record<number, Choice>>({});
   const [docView, setDocView] = useState<'markdown' | 'boxes'>('markdown');
   const [pageIdx, setPageIdx] = useState(0);
-  // Preview UX: collapse the source column to give the two text panes full
-  // width; A- / A+ text zoom; synchronized scrolling between the two panes.
+  // Preview UX: collapse the source column to give the engine panes full width;
+  // A- / A+ text zoom; synchronized scrolling across ALL engine panes.
   const [showSource, setShowSource] = useState(true);
   const [paneZoom, setPaneZoom] = useState(1);
-  const paneScrollRefs = useRef<Record<'default' | 'vllm', HTMLElement | null>>({ default: null, vllm: null });
+  const paneScrollRefs = useRef<Partial<Record<CmpBackend, HTMLElement | null>>>({});
   const syncingScroll = useRef(false);
-  const onPaneScroll = (which: 'default' | 'vllm') => (e: UIEvent<HTMLElement>) => {
+  const onPaneScroll = (which: CmpBackend) => (e: UIEvent<HTMLElement>) => {
     if (syncingScroll.current) return;
-    const other = paneScrollRefs.current[which === 'default' ? 'vllm' : 'default'];
     const self = e.currentTarget;
-    if (!other) return;
     syncingScroll.current = true;
     // Proportional so different-length outputs stay roughly aligned.
-    const denom = Math.max(1, self.scrollHeight - self.clientHeight);
-    other.scrollTop = (self.scrollTop / denom) * Math.max(1, other.scrollHeight - other.clientHeight);
+    const ratio = self.scrollTop / Math.max(1, self.scrollHeight - self.clientHeight);
+    for (const b of PANES) {
+      if (b === which) continue;
+      const other = paneScrollRefs.current[b];
+      if (other) other.scrollTop = ratio * Math.max(1, other.scrollHeight - other.clientHeight);
+    }
     requestAnimationFrame(() => {
       syncingScroll.current = false;
     });
@@ -497,19 +505,19 @@ export function CompareTab() {
     if (pages.length) setRunPages((prev) => ({ ...prev, [idx]: pages }));
     if (isPdfFile(f) && !send.length) {
       const err = { ms: 0, error: 'No pages selected' };
-      return { default: err, vllm: err };
+      return { default: err, vllm: err, lens: err };
     }
     const pageNums = pages.length ? pages : [1]; // a plain image = one page
     if (!pages.length) setRunPages((prev) => ({ ...prev, [idx]: pageNums }));
     const runner = paneRunnerFor(mode);
     setStage(null);
-    setDocProg({ default: 0, vllm: 0, total: send.length });
-    const [d, v] = await Promise.all([
-      runner(send, pageNums, 'default', (n) => setDocProg((p) => (p ? { ...p, default: n } : p))),
-      runner(send, pageNums, 'vllm', (n) => setDocProg((p) => (p ? { ...p, vllm: n } : p))),
-    ]);
+    setDocProg({ total: send.length, default: 0, vllm: 0, lens: 0 });
+    // All three engines run in parallel; each reports its own page progress.
+    const panes = await Promise.all(
+      PANES.map((b) => runner(send, pageNums, b, (n) => setDocProg((p) => (p ? { ...p, [b]: n } : p)))),
+    );
     setDocProg(null);
-    return { default: d, vllm: v };
+    return PANES.reduce((acc, b, i) => ({ ...acc, [b]: panes[i] }), {} as RunResult);
   };
 
   // Run / re-run the active item.
@@ -547,13 +555,13 @@ export function CompareTab() {
       const pageNums = pages.length ? pages : [1];
       if (!pages.length) setRunPages((prev) => ({ ...prev, [activeIdx]: pageNums }));
       setStage(null);
-      setDocProg({ default: 0, vllm: 0, total: send.length });
+      setDocProg({ total: send.length, [backend]: 0 });
       const pane = await paneRunnerFor(mode)(send, pageNums, backend, (n) =>
         setDocProg((p) => (p ? { ...p, [backend]: n } : p)),
       );
       setDocProg(null);
       setResults((prev) => {
-        const cur = prev[activeIdx] ?? { default: { ms: 0 }, vllm: { ms: 0 } };
+        const cur = prev[activeIdx] ?? ({ default: { ms: 0 }, vllm: { ms: 0 }, lens: { ms: 0 } } as RunResult);
         return { ...prev, [activeIdx]: { ...cur, [backend]: pane } };
       });
     } finally {
@@ -605,42 +613,42 @@ export function CompareTab() {
     toast.info(choice === 'tie' ? 'Marked as tie' : `Preferred ${BACKEND_NAME[choice]}`);
   };
 
-  const paneOk = (r?: RunResult) => !!r && r.default.data !== undefined && r.vllm.data !== undefined;
+  // "Done" = every engine pane has FINISHED (data or error), so one engine
+  // being offline (e.g. Google Lens) doesn't block the comparison/exports.
+  const paneOk = (r?: RunResult) => !!r && PANES.every((b) => r[b] && (r[b].data !== undefined || r[b].error !== undefined));
   const bothOk = paneOk(result);
   const doneIdxs = files.map((_, i) => i).filter((i) => paneOk(results[i]));
 
-  // CER scorecard across labeled + completed items (CER is the right metric for
-  // Khmer; WER is English-oriented, so it's intentionally not shown).
+  // CER scorecard across labeled + completed items — per-engine mean CER and a
+  // per-item "lowest CER wins" tally (3-way; ties when the min is shared).
   const scoredIdxs = doneIdxs.filter((i) => labels[i]);
   const nScored = scoredIdxs.length;
   const score = scoredIdxs.reduce(
     (a, i) => {
       const r = results[i];
       const truth = labels[i];
-      const cd = cer(truth, textOf(mode, r.default.data));
-      const cv = cer(truth, textOf(mode, r.vllm.data));
-      a.cerD += cd;
-      a.cerV += cv;
-      if (cv < cd) a.winV += 1;
-      else if (cd < cv) a.winD += 1;
-      else a.tie += 1;
+      const cers = PANES.map((b) => cer(truth, textOf(mode, r[b].data)));
+      const min = Math.min(...cers);
+      PANES.forEach((b, k) => {
+        a.cer[b] += cers[k];
+        if (cers[k] === min) a.win[b] += 1;
+      });
       return a;
     },
-    { cerD: 0, cerV: 0, winD: 0, winV: 0, tie: 0 },
+    {
+      cer: { default: 0, vllm: 0, lens: 0 } as Record<CmpBackend, number>,
+      win: { default: 0, vllm: 0, lens: 0 } as Record<CmpBackend, number>,
+    },
   );
 
   // Per-backend CER for the active labeled item (shown in pane headers).
-  // Compare only ever pits the two original backends against each other, so the
-  // key is the RunResult shape ('default' | 'vllm'), not the wider BackendId.
-  const activeCer = (backend: 'default' | 'vllm'): number | null => {
+  const activeCer = (backend: CmpBackend): number | null => {
     if (!activeLabel || !result || result[backend].data === undefined) return null;
     return cer(activeLabel, textOf(mode, result[backend].data));
   };
 
-  const panesOf = (r: RunResult): ComparePane[] => [
-    { backend: 'default', ms: r.default.ms, data: r.default.data as ComparePane['data'], pageMs: r.default.pageMs },
-    { backend: 'vllm', ms: r.vllm.ms, data: r.vllm.data as ComparePane['data'], pageMs: r.vllm.pageMs },
-  ];
+  const panesOf = (r: RunResult): ComparePane[] =>
+    PANES.map((b) => ({ backend: b, ms: r[b].ms, data: r[b].data as ComparePane['data'], pageMs: r[b].pageMs }));
 
   const saveToHistory = async () => {
     if (!bothOk || !file || !result) return;
@@ -1160,7 +1168,9 @@ export function CompareTab() {
                 <span className="flex items-center gap-1.5 tabular-nums">
                   {(progress || stage) && <span className="text-slate-300">·</span>}
                   <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-accent" />
-                  Page {docProg.default}/{docProg.total} on Khmer Parsing API · {docProg.vllm}/{docProg.total} on Surya
+                  {PANES.filter((b) => docProg[b] !== undefined)
+                    .map((b) => `${BACKEND_NAME[b]} ${docProg[b]}/${docProg.total}`)
+                    .join(' · ')}
                 </span>
               )}
             </span>
@@ -1246,7 +1256,7 @@ export function CompareTab() {
       </div>
 
       {/* Results: source | Cloud | vLLM (source collapsible) */}
-      <div className={`grid gap-4 ${showSource ? 'lg:grid-cols-[0.7fr_1fr_1fr]' : 'lg:grid-cols-2'}`}>
+      <div className={`grid gap-4 ${showSource ? 'lg:grid-cols-[0.55fr_1fr_1fr_1fr]' : 'lg:grid-cols-3'}`}>
         {showSource && (
           <ResultCard title="Source">
             {displayImageUrl ? (
@@ -1259,7 +1269,7 @@ export function CompareTab() {
           </ResultCard>
         )}
 
-        {(['default', 'vllm'] as const).map((backend) => {
+        {PANES.map((backend) => {
           const pane = result?.[backend];
           return (
             <ResultCard
@@ -1352,18 +1362,16 @@ export function CompareTab() {
             <span className="text-sm font-semibold text-slate-950">Accuracy scorecard</span>
             <span className="text-xs text-slate-500">{nScored} labeled · lower CER is better</span>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-              <div className="font-medium text-slate-950">{BACKEND_NAME.default}</div>
-              <div className="text-slate-600">CER {pct(score.cerD / nScored)}</div>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-              <div className="font-medium text-slate-950">{BACKEND_NAME.vllm}</div>
-              <div className="text-slate-600">CER {pct(score.cerV / nScored)}</div>
-            </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {PANES.map((b) => (
+              <div key={b} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                <div className="font-medium text-slate-950">{BACKEND_NAME[b]}</div>
+                <div className="text-slate-600">CER {pct(score.cer[b] / nScored)}</div>
+              </div>
+            ))}
           </div>
           <div className="mt-2 text-xs text-slate-500">
-            Lower-CER wins — {BACKEND_NAME.vllm} {score.winV}/{nScored} · {BACKEND_NAME.default} {score.winD}/{nScored} · tie {score.tie}
+            Lowest-CER wins — {PANES.map((b) => `${BACKEND_NAME[b]} ${score.win[b]}/${nScored}`).join(' · ')}
             <span className="ml-2 text-slate-400">(CER = character error rate, the right metric for Khmer)</span>
           </div>
         </div>
@@ -1372,9 +1380,10 @@ export function CompareTab() {
       {/* Preference (for the active item) */}
       <div className="card mt-5 flex flex-wrap items-center justify-center gap-3 p-4">
         <span className="text-sm font-medium text-slate-950">Which looks better?</span>
-        <VoteButton label="◀ Khmer Parsing API" active={vote === 'default'} disabled={!bothOk} onClick={() => onVote('default')} />
+        {PANES.map((b) => (
+          <VoteButton key={b} label={BACKEND_NAME[b]} active={vote === b} disabled={!bothOk} onClick={() => onVote(b)} />
+        ))}
         <VoteButton label="Tie" active={vote === 'tie'} disabled={!bothOk} onClick={() => onVote('tie')} />
-        <VoteButton label="Surya OCR 2 ▶" active={vote === 'vllm'} disabled={!bothOk} onClick={() => onVote('vllm')} />
       </div>
     </div>
   );

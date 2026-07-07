@@ -36,7 +36,7 @@ export interface RunSettings {
 
 /** One backend's output within a Compare run. */
 export interface ComparePane {
-  backend: 'default' | 'vllm';
+  backend: 'default' | 'vllm' | 'lens';
   ms: number;
   data: DocumentResult | OcrImageResponse | TableResult;
   /** Per-page latency when document mode timed each page individually. */
@@ -48,7 +48,7 @@ export interface CompareRecord {
   kind: 'compare';
   mode: 'ocr' | 'table' | 'document';
   panes: ComparePane[];
-  preferred?: 'default' | 'tie' | 'vllm';
+  preferred?: 'default' | 'tie' | 'vllm' | 'lens';
   /** Compact data-URL preview of the source image (downscaled). */
   sourcePreview?: string;
 }
