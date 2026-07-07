@@ -8,6 +8,7 @@ import { LowConfidencePanel } from '@/components/LowConfidencePanel';
 import { DocumentSearch } from '@/components/DocumentSearch';
 import { PagePreview } from '@/components/PagePreview';
 import { ProgressBar } from '@/components/ProgressBar';
+import { ResultStepper } from '@/components/ResultStepper';
 import { useBatchProcessor } from '@/hooks/useBatchProcessor';
 import { useHistoryAutoSave } from '@/hooks/useHistoryAutoSave';
 import { usePagePreviews } from '@/hooks/usePagePreviews';
@@ -297,11 +298,16 @@ export function DocumentParserTab() {
     };
   }
 
-  const currentResultItem = useMemo(() => {
-    const doneItems = batch.items.filter((it) => it.status === 'done' && it.result);
-    if (doneItems.length > 0) return doneItems[doneItems.length - 1];
-    return batch.items.find((it) => it.result) ?? null;
-  }, [batch.items]);
+  // All finished results (one per processed file/page). A stepper lets you page
+  // back and forth through them; a new run jumps to the newest.
+  const doneItems = useMemo(() => batch.items.filter((it) => it.status === 'done' && it.result), [batch.items]);
+  const [resultIdx, setResultIdx] = useState(0);
+  useEffect(() => {
+    if (doneItems.length > 0) setResultIdx(doneItems.length - 1);
+  }, [doneItems.length]);
+  const safeResultIdx = Math.min(Math.max(0, resultIdx), Math.max(0, doneItems.length - 1));
+  useEffect(() => setPageInResult(0), [safeResultIdx]);
+  const currentResultItem = doneItems[safeResultIdx] ?? batch.items.find((it) => it.result) ?? null;
 
   const currentResult = currentResultItem?.result ?? null;
   const currentResultKey =
@@ -399,7 +405,8 @@ export function DocumentParserTab() {
 
         {currentResult ? (
           <div className="min-w-0">
-            <div className="mb-2 flex justify-end">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <ResultStepper index={safeResultIdx} count={doneItems.length} onChange={setResultIdx} label="Result" />
               <button
                 type="button"
                 onClick={() => batch.reset()}
