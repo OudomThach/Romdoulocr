@@ -1,7 +1,7 @@
 // Tiny markdown renderer — headings, paragraphs, pipe tables, bold/italic/code,
 // and inline images (![alt](url)). Zero runtime deps.
 
-import type { ReactNode } from 'react';
+import type { ReactNode, UIEventHandler } from 'react';
 import { copyToClipboard } from '@/lib/utils';
 
 interface Block {
@@ -115,12 +115,20 @@ function renderInline(text: string): ReactNode[] {
 
 export function MarkdownView({
   source,
-  maxHeight = '560px',
+  maxHeight = '75vh',
   showCopy = true,
+  scrollRef,
+  onScroll,
+  zoom,
 }: {
   source: string;
   maxHeight?: string;
   showCopy?: boolean;
+  /** Attach to the scroll container (for synchronized scrolling in Compare). */
+  scrollRef?: (el: HTMLDivElement | null) => void;
+  onScroll?: UIEventHandler<HTMLDivElement>;
+  /** CSS zoom factor for the A- / A+ text-size control. */
+  zoom?: number;
 }) {
   const blocks = parseMarkdown(source);
 
@@ -148,8 +156,10 @@ export function MarkdownView({
         </div>
       )}
       <div
-        className="overflow-auto rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-950"
-        style={{ maxHeight, paddingRight: showCopy ? '7rem' : undefined }}
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="overflow-auto rounded-lg border border-slate-200 bg-white p-6 text-[15px] leading-relaxed text-slate-950"
+        style={{ maxHeight, paddingRight: showCopy ? '7rem' : undefined, zoom }}
       >
         <article
           className="grid gap-3"
@@ -219,14 +229,14 @@ function PipeTable({ rows }: { rows: string[][] }) {
   if (rows.length === 0) return null;
   const [header, ...body] = rows;
   return (
-    <div className="overflow-auto rounded-none border border-slate-300">
+    <div className="overflow-x-auto rounded-none border border-slate-300">
       <table className="min-w-full border-collapse text-[15px] leading-relaxed">
         <thead>
           <tr>
             {header.map((c, i) => (
               <th
                 key={i}
-                className="border-b border-r border-slate-300 bg-slate-100 px-4 py-3 text-left align-top font-semibold text-slate-950 last:border-r-0"
+                className="sticky top-0 z-10 border-b border-r border-slate-300 bg-slate-100 px-4 py-3 text-left align-top font-semibold text-slate-950 last:border-r-0"
               >
                 {c}
               </th>

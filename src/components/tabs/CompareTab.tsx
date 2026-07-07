@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
 import { api } from '@/lib/api';
 import type { BackendId } from '@/lib/backend';
 import { FileDropzone } from '@/components/FileDropzone';
@@ -229,6 +229,25 @@ export function CompareTab() {
   const [votes, setVotes] = useState<Record<number, Choice>>({});
   const [docView, setDocView] = useState<'markdown' | 'boxes'>('markdown');
   const [pageIdx, setPageIdx] = useState(0);
+  // Preview UX: collapse the source column to give the two text panes full
+  // width; A- / A+ text zoom; synchronized scrolling between the two panes.
+  const [showSource, setShowSource] = useState(true);
+  const [paneZoom, setPaneZoom] = useState(1);
+  const paneScrollRefs = useRef<Record<'default' | 'vllm', HTMLElement | null>>({ default: null, vllm: null });
+  const syncingScroll = useRef(false);
+  const onPaneScroll = (which: 'default' | 'vllm') => (e: UIEvent<HTMLElement>) => {
+    if (syncingScroll.current) return;
+    const other = paneScrollRefs.current[which === 'default' ? 'vllm' : 'default'];
+    const self = e.currentTarget;
+    if (!other) return;
+    syncingScroll.current = true;
+    // Proportional so different-length outputs stay roughly aligned.
+    const denom = Math.max(1, self.scrollHeight - self.clientHeight);
+    other.scrollTop = (self.scrollTop / denom) * Math.max(1, other.scrollHeight - other.clientHeight);
+    requestAnimationFrame(() => {
+      syncingScroll.current = false;
+    });
+  };
   const [pdfPageUrl, setPdfPageUrl] = useState<string | undefined>(undefined);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [tally, setTally] = useState<Tally>(() => readTally());
@@ -1207,17 +1226,36 @@ export function CompareTab() {
         </div>
       )}
 
-      {/* Results: source | Cloud | vLLM */}
-      <div className="grid gap-4 lg:grid-cols-[0.85fr_1fr_1fr]">
-        <ResultCard title="Source">
-          {displayImageUrl ? (
-            <ZoomableImage imageUrl={displayImageUrl} alt="source" minHeightClass="min-h-[260px]" enableKeyboard={false} />
-          ) : (
-            <div className="grid h-[260px] place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center text-sm text-slate-500">
-              {pdfLoading ? 'Rendering page…' : file ? (mode === 'document' ? 'Rendering page…' : 'No preview') : 'Upload file(s), then Run'}
-            </div>
-          )}
-        </ResultCard>
+      {/* Preview controls — collapse the source, zoom the text. */}
+      <div className="mb-2 flex flex-wrap items-center justify-end gap-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setShowSource((s) => !s)}
+          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-950"
+          title={showSource ? 'Hide the source image to widen the text panes' : 'Show the source image'}
+        >
+          {showSource ? '⤢ Hide source' : '⤡ Show source'}
+        </button>
+        <div className="flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+          <button type="button" onClick={() => setPaneZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(2)))} className="px-2.5 py-1 font-semibold text-slate-600 hover:bg-slate-50" title="Smaller text">A−</button>
+          <span className="min-w-[3ch] border-x border-slate-200 px-1.5 py-1 text-center font-mono text-[11px] text-slate-500">{Math.round(paneZoom * 100)}%</span>
+          <button type="button" onClick={() => setPaneZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))} className="px-2.5 py-1 font-semibold text-slate-600 hover:bg-slate-50" title="Larger text">A+</button>
+        </div>
+      </div>
+
+      {/* Results: source | Cloud | vLLM (source collapsible) */}
+      <div className={`grid gap-4 ${showSource ? 'lg:grid-cols-[0.7fr_1fr_1fr]' : 'lg:grid-cols-2'}`}>
+        {showSource && (
+          <ResultCard title="Source">
+            {displayImageUrl ? (
+              <ZoomableImage imageUrl={displayImageUrl} alt="source" minHeightClass="min-h-[260px]" enableKeyboard={false} />
+            ) : (
+              <div className="grid h-[260px] place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center text-sm text-slate-500">
+                {pdfLoading ? 'Rendering page…' : file ? (mode === 'document' ? 'Rendering page…' : 'No preview') : 'Upload file(s), then Run'}
+              </div>
+            )}
+          </ResultCard>
+        )}
 
         {(['default', 'vllm'] as const).map((backend) => {
           const pane = result?.[backend];
@@ -1253,7 +1291,16 @@ export function CompareTab() {
                   {running ? 'Working…' : 'No result yet'}
                 </div>
               ) : (
-                <PaneBody mode={mode} pane={pane} docView={docView} imageUrl={displayImageUrl} pageIdx={pageIdx} />
+                <PaneBody
+                  mode={mode}
+                  pane={pane}
+                  docView={docView}
+                  imageUrl={displayImageUrl}
+                  pageIdx={pageIdx}
+                  zoom={paneZoom}
+                  scrollRef={(el) => (paneScrollRefs.current[backend] = el)}
+                  onScroll={onPaneScroll(backend)}
+                />
               )}
             </ResultCard>
           );
@@ -1349,21 +1396,32 @@ function PaneBody({
   docView,
   imageUrl,
   pageIdx,
+  zoom,
+  scrollRef,
+  onScroll,
 }: {
   mode: Mode;
   pane: Pane;
   docView: 'markdown' | 'boxes';
   imageUrl?: string;
   pageIdx: number;
+  zoom: number;
+  scrollRef: (el: HTMLElement | null) => void;
+  onScroll: (e: UIEvent<HTMLElement>) => void;
 }) {
+  // Taller previews (viewport-relative) so dense output is readable; the two
+  // panes share a synchronized scroll and a common zoom factor.
+  const PANE_H = '72vh';
   if (pane.error) return <div className="text-sm text-rose-600">{pane.error}</div>;
   if (pane.data === undefined) return null;
 
   if (mode === 'table') {
+    // TableGrid owns its own scroll so its sticky header row works; wrap only
+    // for zoom. (Grids don't need the vertical scroll-sync that text panes do.)
     const r = pane.data as TableResult;
     return (
-      <div className="max-h-[420px] overflow-auto">
-        <TableGrid cells={r.cells} rows={r.num_rows} cols={r.num_cols} compact />
+      <div style={{ zoom }}>
+        <TableGrid cells={r.cells} rows={r.num_rows} cols={r.num_cols} compact maxHeight={PANE_H} />
       </div>
     );
   }
@@ -1373,17 +1431,31 @@ function PaneBody({
     if (!page) return <div className="text-sm text-slate-400">No page {pageIdx + 1} in this result.</div>;
     if (docView === 'boxes') {
       return (
-        <div className="space-y-2">
-          <PageImageWithBoxes page={page} imageUrl={imageUrl} maxHeight="380px" />
+        <div ref={scrollRef} onScroll={onScroll} className="space-y-2 overflow-auto" style={{ maxHeight: PANE_H, zoom }}>
+          <PageImageWithBoxes page={page} imageUrl={imageUrl} maxHeight="60vh" />
           <RegionStats page={page} />
         </div>
       );
     }
-    return <MarkdownView source={pageToMarkdown(r, page.page_number)} maxHeight="420px" showCopy={true} />;
+    return (
+      <MarkdownView
+        source={pageToMarkdown(r, page.page_number)}
+        maxHeight={PANE_H}
+        showCopy
+        zoom={zoom}
+        scrollRef={scrollRef}
+        onScroll={onScroll}
+      />
+    );
   }
   const r = normalizeOcrResponse(pane.data);
   return (
-    <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-800">
+    <pre
+      ref={scrollRef}
+      onScroll={onScroll}
+      className="overflow-auto whitespace-pre-wrap font-sans text-[15px] leading-relaxed text-slate-800"
+      style={{ maxHeight: PANE_H, zoom }}
+    >
       {r.text || '(no text returned)'}
     </pre>
   );

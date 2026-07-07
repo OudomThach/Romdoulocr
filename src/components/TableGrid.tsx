@@ -12,9 +12,11 @@ export interface TableGridProps {
   rows: number;
   cols: number;
   compact?: boolean;
+  /** Cap for the internal vertical scroll (viewport-relative recommended). */
+  maxHeight?: string;
 }
 
-export function TableGrid({ cells, rows, cols, compact = false }: TableGridProps) {
+export function TableGrid({ cells, rows, cols, compact = false, maxHeight = '72vh' }: TableGridProps) {
   const grid = useMemo(() => {
     const map = new Map<string, TableCell>();
     for (const cell of cells) map.set(`${cell.row}:${cell.col}`, cell);
@@ -40,34 +42,41 @@ export function TableGrid({ cells, rows, cols, compact = false }: TableGridProps
           </span>
         )}
       </div>
-      <div className="overflow-auto rounded-lg border border-slate-300 bg-white">
+      <div className="overflow-auto rounded-lg border border-slate-300 bg-white" style={{ maxHeight }}>
         <table className="min-w-full border-collapse">
           <tbody>
-            {Array.from({ length: rows }, (_, rowIndex) => (
-              <tr key={rowIndex} className="border-b border-slate-300 odd:bg-white even:bg-slate-50 last:border-b-0">
-                {Array.from({ length: cols }, (_, colIndex) => {
-                  const cell = grid.get(`${rowIndex}:${colIndex}`);
-                  const key = `${rowIndex}:${colIndex}`;
-                  const text = cell?.text ?? '';
-                  const conf = cell?.confidence ?? 0;
-                  const active = hoverKey === key;
+            {Array.from({ length: rows }, (_, rowIndex) => {
+              // Row 0 acts as a sticky header so column headers stay visible
+              // while scrolling long OCR tables.
+              const isHeader = rowIndex === 0;
+              return (
+                <tr key={rowIndex} className="border-b border-slate-300 odd:bg-white even:bg-slate-50 last:border-b-0">
+                  {Array.from({ length: cols }, (_, colIndex) => {
+                    const cell = grid.get(`${rowIndex}:${colIndex}`);
+                    const key = `${rowIndex}:${colIndex}`;
+                    const text = cell?.text ?? '';
+                    const conf = cell?.confidence ?? 0;
+                    const active = hoverKey === key;
 
-                  return (
-                    <td
-                      key={key}
-                      onMouseEnter={() => setHoverKey(key)}
-                      onMouseLeave={() => setHoverKey(null)}
-                      title={cell ? `${fmtPct(conf)} confidence` : 'empty cell'}
-                      className={`border-r border-slate-300 align-top text-slate-950 last:border-r-0 transition-colors ${pad} ${
-                        active ? 'bg-slate-100' : ''
-                      }`}
-                    >
-                      {text || <span className="italic text-slate-400">empty</span>}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+                    return (
+                      <td
+                        key={key}
+                        onMouseEnter={() => setHoverKey(key)}
+                        onMouseLeave={() => setHoverKey(null)}
+                        title={cell ? `${fmtPct(conf)} confidence` : 'empty cell'}
+                        className={`border-r border-slate-300 align-top last:border-r-0 transition-colors ${pad} ${
+                          isHeader
+                            ? 'sticky top-0 z-10 bg-slate-100 font-semibold text-slate-950'
+                            : `text-slate-950 ${active ? 'bg-slate-100' : ''}`
+                        }`}
+                      >
+                        {text || <span className="italic text-slate-400">empty</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

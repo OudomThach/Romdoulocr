@@ -121,7 +121,7 @@ export function ZoomableImage({
             transformOrigin: zoom === 1 ? 'center' : 'top center',
             cursor: zoom > 1 ? 'grab' : 'default',
           }}
-          className="max-h-[620px] w-auto max-w-full rounded bg-white object-contain shadow-sm"
+          className="max-h-[82vh] w-auto max-w-full rounded bg-white object-contain shadow-sm"
         />
       ) : (
         <div className="text-sm text-slate-500">{emptyMessage}</div>
@@ -226,9 +226,9 @@ export function PagePreview({
         </button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
         <ZoomableImage imageUrl={imageUrl} alt={alt} emptyMessage={emptyImageMessage} />
-        <div className="max-h-[620px] overflow-auto rounded-lg border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800">
+        <div className="max-h-[82vh] overflow-auto rounded-lg border border-slate-200 bg-white p-4 text-[15px] leading-relaxed text-slate-800">
           <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{outputLabel}</div>
           {output}
         </div>
