@@ -119,6 +119,121 @@ def _regions_from_words(word_data: list[dict], w: int, h: int) -> list[dict]:
     return regions
 
 
+def _median(xs: list[float]) -> float:
+    s = sorted(xs)
+    return s[len(s) // 2] if s else 0.0
+
+
+def _pixel_words(word_data: list[dict], w: int, h: int) -> list[dict]:
+    out = []
+    for x in word_data or []:
+        g = x.get("geometry")
+        if not g:
+            continue
+        x0, y0, x1, y1 = _word_rect(g, w, h)
+        out.append({"t": x.get("word", ""), "x0": x0, "y0": y0, "x1": x1, "y1": y1, "cx": (x0 + x1) / 2, "cy": (y0 + y1) / 2})
+    return out
+
+
+def _column_bounds(words: list[dict], w: int) -> list[float]:
+    """Detect vertical column-separator x-positions from horizontal whitespace.
+    Words wider than ~45% of the page (spanning titles) are excluded so they
+    don't merge real columns. Returns the x boundaries between columns."""
+    narrow = [z for z in words if (z["x1"] - z["x0"]) < w * 0.45] or words
+    W = int(w) + 2
+    cover = [0] * (W + 1)
+    for z in narrow:
+        a = max(0, int(z["x0"]))
+        b = min(W, int(z["x1"]))
+        for xi in range(a, b + 1):
+            cover[xi] += 1
+    # Covered segments, then merge those separated by a gap smaller than the
+    # column-gap threshold (real column gaps are wider than inter-word spaces).
+    segs: list[list[int]] = []
+    x = 0
+    while x <= W:
+        if cover[x] > 0:
+            start = x
+            while x <= W and cover[x] > 0:
+                x += 1
+            segs.append([start, x - 1])
+        else:
+            x += 1
+    min_gap = max(8, int(w * 0.012))
+    merged: list[list[int]] = []
+    for s in segs:
+        if merged and s[0] - merged[-1][1] < min_gap:
+            merged[-1][1] = s[1]
+        else:
+            merged.append(s)
+    return [(merged[k][1] + merged[k + 1][0]) / 2 for k in range(len(merged) - 1)]
+
+
+def _col_of(cx: float, bounds: list[float]) -> int:
+    c = 0
+    for b in bounds:
+        if cx > b:
+            c += 1
+        else:
+            break
+    return c
+
+
+def _grid_from_words(word_data: list[dict], w: int, h: int) -> tuple[int, int, list[dict], str]:
+    """Reconstruct a table grid from Lens word geometry: rows by vertical
+    proximity, columns by horizontal whitespace gaps."""
+    words = _pixel_words(word_data, w, h)
+    if not words:
+        return 0, 0, [], ""
+    tol = (_median([z["y1"] - z["y0"] for z in words]) or h * 0.02) * 0.6
+    # Rows: cluster by center_y.
+    ws = sorted(words, key=lambda z: z["cy"])
+    rows: list[list[dict]] = []
+    cur: list[dict] = []
+    base: float | None = None
+    for wd in ws:
+        if base is None or wd["cy"] - base <= tol:
+            cur.append(wd)
+            base = wd["cy"] if base is None else base
+        else:
+            rows.append(cur)
+            cur = [wd]
+            base = wd["cy"]
+    if cur:
+        rows.append(cur)
+
+    bounds = _column_bounds(words, w)
+    ncols = len(bounds) + 1
+    grid: dict[tuple[int, int], list[dict]] = {}
+    for ri, row in enumerate(rows):
+        for wd in row:
+            grid.setdefault((ri, _col_of(wd["cx"], bounds)), []).append(wd)
+
+    cells: list[dict] = []
+    matrix = [["" for _ in range(ncols)] for _ in range(len(rows))]
+    for (ri, ci), cws in grid.items():
+        cws.sort(key=lambda z: z["cx"])
+        text = " ".join(z["t"] for z in cws).strip()
+        if not text:
+            continue
+        x0 = min(z["x0"] for z in cws)
+        y0 = min(z["y0"] for z in cws)
+        x1 = max(z["x1"] for z in cws)
+        y1 = max(z["y1"] for z in cws)
+        matrix[ri][ci] = text
+        cells.append(
+            {
+                "row": ri,
+                "col": ci,
+                "text": text,
+                "bbox": {"points": _rect_to_points(x0, y0, x1, y1), "confidence": 1.0},
+                "confidence": 1.0,
+            }
+        )
+    structured = "\n".join("\t".join(r) for r in matrix)
+    return len(rows), ncols, cells, structured
+
+
 async def _lens_ocr(data: bytes, lang: str) -> dict[str, Any]:
     """Run Google Lens on raw image bytes; return the lens result dict + dims."""
     with Image.open(io.BytesIO(data)) as im:
@@ -208,22 +323,34 @@ async def parse_pdf_translated(
 
 @app.post("/parse-table")
 async def parse_table(file: UploadFile = File(...), dpi: int | None = Query(None)) -> JSONResponse:
-    """Lens has no table structure — return the text as a single-column grid
-    (one row per line), matching the vLLM adapter's no-table fallback so the
-    Parse Table tab still shows something usable."""
+    """Reconstruct a multi-column grid from Lens word geometry (rows by vertical
+    proximity, columns by horizontal whitespace gaps). Best-effort — Lens has no
+    native table model. Falls back to a single-column line list when no columns
+    are detected (e.g. prose)."""
     try:
         res = await _lens_ocr(await file.read(), DEFAULT_LANG)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"detail": f"Google Lens error: {exc}"}, status_code=502)
-    lines = [ln for ln in (res.get("ocr_text") or "").split("\n") if ln.strip()]
-    cells = [{"row": i, "col": 0, "text": ln, "bbox": {"points": [[0, 0], [0, 0], [0, 0], [0, 0]], "confidence": 1.0}, "confidence": 1.0} for i, ln in enumerate(lines)]
+
+    w, h = res.get("_w", 0), res.get("_h", 0)
+    num_rows, num_cols, cells, structured = _grid_from_words(res.get("word_data") or [], w, h)
+
+    # Fallback: no real columns → one line per row (previous behavior).
+    if num_cols <= 1:
+        lines = [ln for ln in (res.get("ocr_text") or "").split("\n") if ln.strip()]
+        cells = [
+            {"row": i, "col": 0, "text": ln, "bbox": {"points": [[0, 0], [0, 0], [0, 0], [0, 0]], "confidence": 1.0}, "confidence": 1.0}
+            for i, ln in enumerate(lines)
+        ]
+        num_rows, num_cols, structured = len(lines), (1 if lines else 0), "\n".join(lines)
+
     return JSONResponse(
         {
             "filename": file.filename,
-            "num_rows": len(lines),
-            "num_cols": 1 if lines else 0,
+            "num_rows": num_rows,
+            "num_cols": num_cols,
             "cells": cells,
-            "structured_text": "\n".join(lines),
+            "structured_text": structured,
             "debug_image": None,
         }
     )
