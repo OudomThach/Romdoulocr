@@ -8,6 +8,7 @@ import { getBackend, subscribeBackend, type BackendId } from '@/lib/backend';
 const BACKEND_LABEL: Record<BackendId, string> = {
   default: 'Khmer Parsing API',
   vllm: 'Surya OCR 2',
+  lens: 'Google Lens',
 };
 
 export function HealthStatus() {

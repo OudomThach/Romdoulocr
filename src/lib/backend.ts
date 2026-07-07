@@ -14,7 +14,7 @@
  * useSyncExternalStore.
  */
 
-export type BackendId = 'default' | 'vllm';
+export type BackendId = 'default' | 'vllm' | 'lens';
 
 /**
  * Build-time switch: hosted builds (e.g. Netlify) set VITE_VLLM_ENABLED=false
@@ -33,14 +33,19 @@ const STORAGE_KEY = 'ocr.backend';
 // OCR inference would exceed).
 const DEFAULT_BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '');
 const VLLM_BASE = (import.meta.env.VITE_VLLM_URL ?? '/api-vllm').replace(/\/$/, '');
+// Google Lens adapter — same pattern: relative /api-lens via nginx at home, or
+// an absolute funnel URL (VITE_LENS_URL) on the hosted build.
+const LENS_BASE = (import.meta.env.VITE_LENS_URL ?? '/api-lens').replace(/\/$/, '');
 
 function read(): BackendId {
-  if (!VLLM_ENABLED) return 'default'; // clamp stale localStorage on hosted builds
   try {
-    return localStorage.getItem(STORAGE_KEY) === 'vllm' ? 'vllm' : 'default';
+    const v = localStorage.getItem(STORAGE_KEY);
+    if (v === 'vllm' && VLLM_ENABLED) return 'vllm';
+    if (v === 'lens') return 'lens';
   } catch {
-    return 'default';
+    // storage blocked → default
   }
+  return 'default';
 }
 
 let current: BackendId = read();
@@ -52,7 +57,9 @@ export function getBackend(): BackendId {
 
 /** Base URL prefix for a specific backend (used to probe both for health). */
 export function baseUrlFor(backend: BackendId): string {
-  return backend === 'vllm' ? VLLM_BASE : DEFAULT_BASE;
+  if (backend === 'vllm') return VLLM_BASE;
+  if (backend === 'lens') return LENS_BASE;
+  return DEFAULT_BASE;
 }
 
 /** Base URL prefix the API client should use for the current backend. */

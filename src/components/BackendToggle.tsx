@@ -19,6 +19,7 @@ import { getBackend, setBackend, subscribeBackend, VLLM_ENABLED, type BackendId 
 const OPTIONS: { id: BackendId; label: string; title: string }[] = [
   { id: 'default', label: 'Default', title: 'Cloud Modal API (default)' },
   { id: 'vllm', label: 'vLLM', title: 'Local vLLM OCR backend' },
+  { id: 'lens', label: 'Google Lens', title: 'Google Lens OCR (free, via the lens adapter)' },
 ];
 
 function statusDot(q: UseQueryResult<HealthCheckResponse>): string {
@@ -41,7 +42,13 @@ export function BackendToggle() {
     setBackend(id);
     // Re-validate anything fetched from the previous backend.
     queryClient.invalidateQueries({ queryKey: ['health'] });
-    toast.info(id === 'vllm' ? 'Switched to Surya OCR 2 (vLLM) backend' : 'Switched to Khmer Parsing API backend');
+    toast.info(
+      id === 'vllm'
+        ? 'Switched to Surya OCR 2 (vLLM) backend'
+        : id === 'lens'
+          ? 'Switched to Google Lens backend'
+          : 'Switched to Khmer Parsing API backend',
+    );
   };
 
   return (

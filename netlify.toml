@@ -17,6 +17,7 @@
   NODE_VERSION = "22"
   VITE_API_URL = "https://apt-server-desktop.tail806605.ts.net/api"
   VITE_VLLM_URL = "https://apt-server-desktop.tail806605.ts.net/api-vllm"
+  VITE_LENS_URL = "https://apt-server-desktop.tail806605.ts.net/api-lens"
 
 # SPA fallback — serve index.html for any unknown path. (No /api proxy here
 # anymore; the SPA calls the funnel directly at the absolute URLs above.)

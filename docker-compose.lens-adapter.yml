@@ -1,0 +1,37 @@
+# Google Lens backend adapter for the Romdoul OCR SPA.
+#
+# Wraps the free (unofficial) Google Lens OCR via chrome-lens-py and speaks the
+# SPA's khparser contract. The SPA reaches it when the header backend toggle is
+# set to "Google Lens" — nginx routes /api-lens/* here. Runs on the same host
+# as the SPA container; joins its default network so nginx resolves it by name.
+#
+# Deploy:  docker compose -f docker-compose.lens-adapter.yml up -d --build
+#
+# No GPU, no API key, no billing — it calls Google Lens directly. It DOES need
+# outbound internet. ADAPTER_TOKEN (from root .env) gates it, same as vLLM.
+
+name: lens-adapter
+
+services:
+  lens-adapter:
+    build:
+      context: ./lens-adapter
+      dockerfile: Dockerfile
+    image: lens-adapter:latest
+    container_name: lens-adapter
+    environment:
+      ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
+      LENS_OCR_LANG: ${LENS_OCR_LANG:-km}
+    ports:
+      - "${LENS_ADAPTER_PORT:-8091}:8091"
+    networks:
+      - ocrapi_default
+    restart: unless-stopped
+
+networks:
+  # The khmer-parser-ui compose project's default network, so nginx can resolve
+  # `lens-adapter` by container name. (Project dir is `ocrapi_backup` → network
+  # name `ocrapi_backup_default`; adjust if your compose project name differs.)
+  ocrapi_default:
+    external: true
+    name: ocrapi_backup_default

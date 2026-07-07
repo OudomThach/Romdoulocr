@@ -630,7 +630,9 @@ export function CompareTab() {
   );
 
   // Per-backend CER for the active labeled item (shown in pane headers).
-  const activeCer = (backend: BackendId): number | null => {
+  // Compare only ever pits the two original backends against each other, so the
+  // key is the RunResult shape ('default' | 'vllm'), not the wider BackendId.
+  const activeCer = (backend: 'default' | 'vllm'): number | null => {
     if (!activeLabel || !result || result[backend].data === undefined) return null;
     return cer(activeLabel, textOf(mode, result[backend].data));
   };

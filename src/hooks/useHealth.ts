@@ -52,5 +52,6 @@ export function useBackendsHealth(): BackendsHealth {
   return {
     default: useBackendHealth('default'),
     vllm: useBackendHealth('vllm'),
+    lens: useBackendHealth('lens'),
   };
 }
