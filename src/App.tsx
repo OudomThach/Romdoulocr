@@ -127,7 +127,9 @@ export default function App() {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-7 pb-24 sm:px-6 sm:pb-7">
+        {/* Wide cap so document/table/compare use the monitor instead of a
+            narrow centered column (the OCR tab keeps its own max-w-3xl). */}
+        <main className="mx-auto w-full max-w-[2200px] flex-1 px-4 py-7 pb-24 sm:px-6 sm:pb-7">
           {/* Keep the work tabs MOUNTED and just hide the inactive ones, so an
               in-progress extraction / result doesn't get thrown away when you
               switch tabs. Only a full page refresh resets them (in-memory state).
