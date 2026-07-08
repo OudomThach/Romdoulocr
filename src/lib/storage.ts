@@ -79,6 +79,18 @@ export interface StoredRun {
   notes: string;
   tags: string[];
   favorite: boolean;
+  /** "Transform to tidy" output saved alongside a table run (Table tab). */
+  tidy?: TidyRecord;
+}
+
+/** A saved tidy-transform result (LLM-reshaped table), stored on a table run. */
+export interface TidyRecord {
+  columns: string[];
+  rows: string[][];
+  tidy_markdown: string;
+  tidy_csv: string;
+  notes: string;
+  model: string;
 }
 
 // --------------------------------------------------------------------------- //

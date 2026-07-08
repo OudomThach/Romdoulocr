@@ -7,6 +7,8 @@ import { MarkdownView } from '@/components/MarkdownView';
 import { ProgressBar } from '@/components/ProgressBar';
 import { TableGrid } from '@/components/TableGrid';
 import { TidyPanel } from '@/components/TidyPanel';
+import { useHistory } from '@/hooks/useHistory';
+import type { TidyResult } from '@/lib/tidy';
 import { ZoomableImage } from '@/components/PagePreview';
 import { ResultStepper } from '@/components/ResultStepper';
 import { useBatchProcessor } from '@/hooks/useBatchProcessor';
@@ -198,6 +200,21 @@ export function TableParserTab() {
     return prepared[0] ?? undefined;
   }, [currentResultKey, prepared]);
 
+  // Tidy results, kept per result-key so they survive switching the result view
+  // (the Tidy panel unmounts), stepping between results, and other app tabs.
+  // Each is also saved onto its History run (matched by result-object identity).
+  const history = useHistory();
+  const [tidyByKey, setTidyByKey] = useState<Record<string, TidyResult>>({});
+  const onTidy = (t: TidyResult) => {
+    if (currentResultKey) setTidyByKey((prev) => ({ ...prev, [currentResultKey]: t }));
+    const run = history.runs.find((r) => r.tab === 'table' && r.result === currentResult);
+    if (run) {
+      history.updateRun(run.id, {
+        tidy: { columns: t.columns, rows: t.rows, tidy_markdown: t.tidy_markdown, tidy_csv: t.tidy_csv, notes: t.notes, model: t.model },
+      });
+    }
+  };
+
   // The exact image that was OCR'd lives in the result item's args — for a PDF
   // that's the rasterized page, for an image the processed file. Using it means
   // the preview always matches the result (PDFs no longer show "no preview").
@@ -281,6 +298,8 @@ export function TableParserTab() {
             markdownMode={markdownMode}
             onMarkdownModeChange={setMarkdownMode}
             filenameBase={filenameBase}
+            tidyResult={currentResultKey ? tidyByKey[currentResultKey] ?? null : null}
+            onTidy={onTidy}
           />
           </div>
         ) : (
@@ -470,6 +489,8 @@ function TableExtractionResultsCard({
   markdownMode,
   onMarkdownModeChange,
   filenameBase,
+  tidyResult,
+  onTidy,
 }: {
   result: TableResult | null;
   uploadPreviewUrl?: string;
@@ -479,6 +500,8 @@ function TableExtractionResultsCard({
   markdownMode: MarkdownMode;
   onMarkdownModeChange: (mode: MarkdownMode) => void;
   filenameBase: string;
+  tidyResult: TidyResult | null;
+  onTidy: (r: TidyResult) => void;
 }) {
   const [editedMarkdown, setEditedMarkdown] = useState(markdownSource);
 
@@ -689,7 +712,7 @@ function TableExtractionResultsCard({
         ) : resultView === 'preview' ? (
           <PreviewPane result={result} uploadPreviewUrl={uploadPreviewUrl} />
         ) : resultView === 'tidy' ? (
-          <TidyPanel markdown={editedMarkdown} filenameBase={filenameBase} />
+          <TidyPanel markdown={editedMarkdown} filenameBase={filenameBase} result={tidyResult} onResult={onTidy} />
         ) : (
           // Grid / Markdown views: keep the SOURCE IMAGE alongside the data so
           // the photo is always visible, not hidden behind the Preview tab.

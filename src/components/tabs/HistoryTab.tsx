@@ -619,8 +619,58 @@ function TableResultDetail({ result, run, onUpdate }: { result: TableResult; run
             copyHint: 'Formatted JSON · what gets saved to .json',
             content: <JsonTree data={result} maxHeight="360px" />,
           },
+          ...(run.tidy
+            ? [
+                {
+                  id: 'tidy',
+                  label: '✨ Tidy',
+                  copyText: run.tidy.tidy_csv,
+                  copyHint: `Tidy CSV · reshaped via ${run.tidy.model}`,
+                  content: <SavedTidyView tidy={run.tidy} />,
+                },
+              ]
+            : []),
         ]}
       />
+    </div>
+  );
+}
+
+function SavedTidyView({ tidy }: { tidy: NonNullable<StoredRun['tidy']> }) {
+  return (
+    <div className="grid gap-2">
+      {tidy.notes && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+          <span className="font-semibold">What changed:</span> {tidy.notes}
+        </div>
+      )}
+      <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full border-collapse text-sm">
+          <thead className="sticky top-0 bg-slate-100">
+            <tr>
+              {tidy.columns.map((c, i) => (
+                <th key={i} className="border-b border-slate-200 px-3 py-2 text-left font-semibold text-slate-950">
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tidy.rows.map((row, ri) => (
+              <tr key={ri} className={ri % 2 ? 'bg-slate-50' : 'bg-white'}>
+                {tidy.columns.map((_, ci) => (
+                  <td key={ci} className="border-b border-slate-100 px-3 py-1.5 align-top text-slate-800">
+                    {row[ci] ?? ''}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[11px] text-slate-400">
+        {tidy.rows.length} rows × {tidy.columns.length} columns · via {tidy.model}
+      </div>
     </div>
   );
 }

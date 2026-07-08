@@ -9,17 +9,22 @@ import { copyToClipboard, downloadText } from '@/lib/utils';
  * demand, and renders the reshaped tidy table (grid + notes) with copy/download.
  * Independent of the OCR backend toggle — it's a post-extraction LLM transform.
  */
-export function TidyPanel({ markdown, filenameBase }: { markdown: string; filenameBase: string }) {
+export function TidyPanel({
+  markdown,
+  filenameBase,
+  result,
+  onResult,
+}: {
+  markdown: string;
+  filenameBase: string;
+  /** Controlled result — lives in the parent so it survives view / tab switches
+   * (this panel unmounts when you leave the Tidy view) and is saved to History. */
+  result: TidyResult | null;
+  onResult: (r: TidyResult) => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<TidyResult | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-
-  // A new extraction (new markdown) invalidates a previous tidy result.
-  useEffect(() => {
-    setResult(null);
-    setError(null);
-  }, [markdown]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -36,7 +41,7 @@ export function TidyPanel({ markdown, filenameBase }: { markdown: string; filena
     setError(null);
     try {
       const res = await transformToTidy(source, { signal: ctrl.signal });
-      setResult(res);
+      onResult(res);
     } catch (e) {
       if (!ctrl.signal.aborted) {
         setError(e instanceof Error ? e.message : 'Tidy transform failed');
