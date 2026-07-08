@@ -83,11 +83,14 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 /** Trigger a browser download of raw bytes (Uint8Array / ArrayBuffer). */
-export function downloadBytes(filename: string, data: Uint8Array, mime: string): void {
-  // Copy into a fresh ArrayBuffer so the Blob constructor accepts it
-  // regardless of whether the source buffer is shared.
-  const copy = new Uint8Array(data.byteLength);
-  copy.set(data);
+export function downloadBytes(filename: string, data: Uint8Array | ArrayBuffer, mime: string): void {
+  // Normalize first: some producers (SheetJS write({type:'array'})) return a
+  // raw ArrayBuffer. `copy.set(arrayBuffer)` silently copies NOTHING (an
+  // ArrayBuffer has no length), which produced all-zero, corrupt .xlsx files.
+  // Wrap ArrayBuffer in a view, then copy into a fresh buffer for the Blob.
+  const src = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const copy = new Uint8Array(src.byteLength);
+  copy.set(src);
   const blob = new Blob([copy.buffer], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

@@ -880,7 +880,7 @@ async function downloadTableXlsx(result: TableResult, filenameBase: string): Pro
     return { wch: Math.min(60, maxLen + 2) };
   });
   XLSX.utils.book_append_sheet(wb, ws, 'Table');
-  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array;
+  const out = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
   downloadBytes(`${filenameBase}.xlsx`, out, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 

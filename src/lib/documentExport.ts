@@ -171,8 +171,9 @@ export async function exportDocumentToXlsx(doc: DocumentResult): Promise<Uint8Ar
     XLSX.utils.book_append_sheet(wb, ws, safeName);
   }
 
-  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array;
-  return out;
+  // SheetJS write({type:'array'}) returns an ArrayBuffer — wrap it in a real
+  // Uint8Array so both the download and the ZIP-entry paths get valid bytes.
+  return new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
 }
 
 export async function exportDocumentToDocx(doc: DocumentResult): Promise<Uint8Array> {
@@ -448,7 +449,7 @@ export async function exportSingleTableToXlsx(
     return { wch: Math.min(60, Math.max(10, maxLen + 2)) };
   });
   XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31).replace(/[\\/?*[\]:]/g, '_'));
-  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as Uint8Array;
+  return new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
 }
 
 export async function downloadSingleTableXlsx(
