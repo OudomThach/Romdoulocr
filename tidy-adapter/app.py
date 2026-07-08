@@ -41,6 +41,7 @@ import json
 import os
 import re
 import threading
+import time
 from typing import Any
 
 import httpx
@@ -61,6 +62,20 @@ PROVIDER = "gemini" if MODEL.lower().startswith("gemini") else "anthropic"
 MAX_TOKENS = int(os.environ.get("TIDY_MAX_TOKENS", "16000"))
 MAX_MARKDOWN_CHARS = int(os.environ.get("TIDY_MAX_CHARS", "200000"))
 EXEC_TIMEOUT = int(os.environ.get("TIDY_EXEC_TIMEOUT", "20"))
+
+# How many LLM calls a transform is allowed to spend.
+#   auto   (default) → 1 call (single-pass) for simple tables; escalate to the
+#                      3-call pipeline ONLY when the deterministic profile flags
+#                      real structural complexity (wide/matrix, section rows,
+#                      totals). Keeps free-tier Gemini quota from draining after
+#                      a few clicks.
+#   always            → always run the 3-step pipeline (old behaviour).
+#   never             → always single-pass, never the pipeline.
+PIPELINE_MODE = (os.environ.get("TIDY_PIPELINE", "auto").strip().lower() or "auto")
+# 429 handling: retry a transient per-minute burst, respecting Google's
+# suggested retryDelay, capped so a per-DAY quota doesn't make us sleep forever.
+GEMINI_MAX_RETRIES = int(os.environ.get("TIDY_GEMINI_RETRIES", "3"))
+GEMINI_MAX_BACKOFF = float(os.environ.get("TIDY_GEMINI_MAX_BACKOFF", "20"))
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -139,6 +154,20 @@ Return ONLY a JSON object: `columns` (header names), `rows` (each an array of ce
 # --------------------------------------------------------------------------- #
 # LLM plumbing (provider-agnostic)
 # --------------------------------------------------------------------------- #
+class _RateLimited(RuntimeError):
+    """LLM provider returned 429 / quota exhausted. Carries a suggested wait (s)."""
+
+    def __init__(self, message: str, retry_after: float = 0.0):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _retry_delay_seconds(body_text: str) -> float:
+    """Pull the RetryInfo retryDelay (e.g. "retryDelay": "17s") from a Gemini 429."""
+    m = re.search(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"', body_text or "")
+    return float(m.group(1)) if m else 0.0
+
+
 def _gemini(system: str, user: str, json_mode: bool) -> str:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={GEMINI_KEY}"
     gen: dict[str, Any] = {"maxOutputTokens": MAX_TOKENS, "temperature": 0, "thinkingConfig": {"thinkingBudget": 0}}
@@ -149,25 +178,47 @@ def _gemini(system: str, user: str, json_mode: bool) -> str:
         "contents": [{"role": "user", "parts": [{"text": user}]}],
         "generationConfig": gen,
     }
-    with httpx.Client(timeout=120.0) as client:
-        r = client.post(url, json=body)
-    if r.status_code != 200:
+    last_429 = ""
+    for attempt in range(GEMINI_MAX_RETRIES + 1):
+        with httpx.Client(timeout=120.0) as client:
+            r = client.post(url, json=body)
+        if r.status_code == 200:
+            data = r.json()
+            cands = data.get("candidates") or []
+            if not cands:
+                reason = (data.get("promptFeedback") or {}).get("blockReason")
+                raise RuntimeError(f"Gemini returned no candidates{f' (blocked: {reason})' if reason else ''}")
+            parts = (cands[0].get("content") or {}).get("parts") or []
+            return "".join(p.get("text", "") for p in parts)
+        if r.status_code == 429:
+            last_429 = r.text
+            suggested = _retry_delay_seconds(r.text)
+            if attempt < GEMINI_MAX_RETRIES:
+                # Respect Google's retryDelay for per-minute bursts, but cap it so a
+                # per-day quota (huge/absent delay) doesn't block the request forever.
+                delay = min(suggested or (1.5 * (2 ** attempt)), GEMINI_MAX_BACKOFF)
+                time.sleep(delay)
+                continue
+            raise _RateLimited(f"Gemini HTTP 429: {r.text[:300]}", retry_after=suggested)
+        # 500/503 are transient server-side spikes ("high demand") — back off and retry.
+        if r.status_code in (500, 503) and attempt < GEMINI_MAX_RETRIES:
+            time.sleep(min(1.5 * (2 ** attempt), GEMINI_MAX_BACKOFF))
+            continue
         raise RuntimeError(f"Gemini HTTP {r.status_code}: {r.text[:300]}")
-    data = r.json()
-    cands = data.get("candidates") or []
-    if not cands:
-        reason = (data.get("promptFeedback") or {}).get("blockReason")
-        raise RuntimeError(f"Gemini returned no candidates{f' (blocked: {reason})' if reason else ''}")
-    parts = (cands[0].get("content") or {}).get("parts") or []
-    return "".join(p.get("text", "") for p in parts)
+    raise _RateLimited(f"Gemini HTTP 429: {last_429[:300]}")
 
 
 def _anthropic(system: str, user: str, json_mode: bool) -> str:
     sys = system + ("\n\nRespond with ONLY a single valid JSON object — no prose, no code fences." if json_mode else "")
-    resp = _client.messages.create(  # type: ignore[union-attr]
-        model=MODEL, max_tokens=MAX_TOKENS, system=sys,
-        messages=[{"role": "user", "content": user}],
-    )
+    try:
+        resp = _client.messages.create(  # type: ignore[union-attr]
+            model=MODEL, max_tokens=MAX_TOKENS, system=sys,
+            messages=[{"role": "user", "content": user}],
+        )
+    except Exception as e:  # noqa: BLE001 — normalise rate limits to _RateLimited
+        if getattr(e, "status_code", None) == 429 or "rate_limit" in str(e).lower():
+            raise _RateLimited(f"Anthropic 429: {str(e)[:200]}") from e
+        raise
     if getattr(resp, "stop_reason", None) == "refusal":
         raise RuntimeError("refusal")
     return _response_text(resp)
@@ -469,8 +520,31 @@ def _df_to_table(df: pd.DataFrame) -> tuple[list[str], list[list[str]]]:
 # --------------------------------------------------------------------------- #
 # The 3-step pipeline + single-pass fallback
 # --------------------------------------------------------------------------- #
-def _pipeline(df_raw: pd.DataFrame, instructions: str) -> tuple[list[str], list[list[str]], str, dict[str, Any]]:
-    profile = _profile(df_raw)
+def _needs_pipeline(profile: dict[str, Any]) -> bool:
+    """Does this table have structural mess that single-pass handles poorly?
+
+    Deterministic, no LLM. The 3-step pipeline earns its extra 2-3 API calls only
+    when the table is wide/matrix, has section-header rows, or has total rows —
+    everything else is already close to tidy and a single call reshapes it fine.
+    """
+    if profile.get("candidate_section_header_rows") or profile.get("candidate_total_rows"):
+        return True
+    cols = profile.get("columns") or []
+    _, ncols = (profile.get("shape") or [0, 0])
+    # Wide/matrix: many mostly-numeric value columns (e.g. one per year/month).
+    numeric_heavy = sum(1 for c in cols if (c.get("looks_numeric") or 0) >= 0.6 and (c.get("n_nonempty") or 0) > 0)
+    if numeric_heavy >= 3:
+        return True
+    # Lots of columns is itself a smell of a wide layout worth the pipeline.
+    if ncols >= 8:
+        return True
+    return False
+
+
+def _pipeline(
+    df_raw: pd.DataFrame, instructions: str, profile: dict[str, Any] | None = None
+) -> tuple[list[str], list[list[str]], str, dict[str, Any]]:
+    profile = profile if profile is not None else _profile(df_raw)
     note = f"\n\nUser note: {instructions}" if instructions else ""
     pj = json.dumps(profile, ensure_ascii=False)
 
@@ -509,6 +583,35 @@ def _single_shot(markdown: str, instructions: str) -> tuple[list[str], list[list
     return columns, rows, str(data.get("notes") or "")
 
 
+def _transform(
+    df_raw: pd.DataFrame, markdown: str, instructions: str
+) -> tuple[list[str], list[list[str]], str, str, dict[str, Any]]:
+    """Decide how many LLM calls to spend, then produce the tidy table.
+
+    Returns (columns, rows, notes, method, extras). `_RateLimited` is allowed to
+    propagate — the caller maps it to a friendly 429 and does NOT retry with more
+    calls (that would just burn more quota).
+    """
+    profile = _profile(df_raw)
+    use_pipeline = PIPELINE_MODE == "always" or (PIPELINE_MODE == "auto" and _needs_pipeline(profile))
+
+    if use_pipeline:
+        try:
+            columns, rows, notes, extras = _pipeline(df_raw, instructions, profile=profile)
+            return columns, rows, notes, "pipeline", extras
+        except _RateLimited:
+            raise  # don't spend a 4th call — surface the quota error
+        except Exception as pipe_err:  # noqa: BLE001 — pipeline failed → single-pass
+            columns, rows, notes = _single_shot(markdown, instructions)
+            reason = str(pipe_err)[:200]
+            notes = f"{notes}  (3-step pipeline fell back to single-pass: {reason[:120]})".strip()
+            return columns, rows, notes, "single", {"fallback_reason": reason}
+
+    # Simple table (or TIDY_PIPELINE=never): one call, done.
+    columns, rows, notes = _single_shot(markdown, instructions)
+    return columns, rows, notes, "single", {}
+
+
 # --------------------------------------------------------------------------- #
 # Middleware / request model
 # --------------------------------------------------------------------------- #
@@ -540,7 +643,7 @@ async def health() -> JSONResponse:
         "ready": HAS_KEY,
         "provider": PROVIDER,
         "model": MODEL,
-        "pipeline": "3-step",
+        "pipeline": PIPELINE_MODE,
         "message": f"tidy backend ({PROVIDER})" if HAS_KEY else f"{keyname} not set",
     })
 
@@ -563,24 +666,26 @@ def tidy(req: TidyRequest) -> JSONResponse:
         return JSONResponse({"detail": "Table is too large to transform."}, status_code=413)
     instructions = (req.instructions or "").strip()
 
-    method = "pipeline"
-    extras: dict[str, Any] = {}
     try:
         df_raw = _build_df(markdown)
-        columns, rows, notes, extras = _pipeline(df_raw, instructions)
-    except Exception as pipe_err:  # noqa: BLE001 — any failure → single-pass fallback
-        try:
-            columns, rows, notes = _single_shot(markdown, instructions)
-        except RuntimeError as exc:
-            if str(exc) == "refusal":
-                return JSONResponse({"detail": "The model declined to transform this input."}, status_code=422)
-            return JSONResponse({"detail": f"Tidy failed: {exc}"}, status_code=502)
-        except Exception as exc:  # noqa: BLE001
-            return JSONResponse({"detail": f"Tidy failed: {exc}"}, status_code=502)
-        method = "single"
-        reason = str(pipe_err)[:200]
-        extras = {"fallback_reason": reason}
-        notes = f"{notes}  (3-step pipeline fell back to single-pass: {reason[:120]})".strip()
+        columns, rows, notes, method, extras = _transform(df_raw, markdown, instructions)
+    except _RateLimited as exc:
+        wait = f" Try again in about {int(exc.retry_after)}s." if exc.retry_after else " Wait a minute and try again."
+        headers = {"Retry-After": str(int(exc.retry_after))} if exc.retry_after else None
+        return JSONResponse(
+            {"detail": (
+                f"{PROVIDER.title()} rate limit / quota reached (free tier).{wait} "
+                "For heavy use, enable billing on your API key or set TIDY_PIPELINE=never to spend one call per transform."
+            )},
+            status_code=429,
+            headers=headers,
+        )
+    except RuntimeError as exc:
+        if str(exc) == "refusal":
+            return JSONResponse({"detail": "The model declined to transform this input."}, status_code=422)
+        return JSONResponse({"detail": f"Tidy failed: {exc}"}, status_code=502)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"detail": f"Tidy failed: {exc}"}, status_code=502)
 
     if not columns and rows:
         columns = [f"Column {i + 1}" for i in range(max(len(r) for r in rows))]

@@ -21,7 +21,11 @@ services:
     image: tidy-adapter:latest
     container_name: tidy-adapter
     environment:
-      TIDY_MODEL: ${TIDY_MODEL:-gemini-2.5-flash}
+      TIDY_MODEL: ${TIDY_MODEL:-gemini-2.5-flash-lite}
+      # never = 1 LLM call/transform (frugal, best for free-tier quota + fewest
+      # 503s). auto = escalate to the 3-step pipeline only for complex tables.
+      # always = old 3-call pipeline. See app.py.
+      TIDY_PIPELINE: ${TIDY_PIPELINE:-never}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
