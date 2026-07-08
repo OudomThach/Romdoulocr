@@ -19,6 +19,17 @@ export interface TidyResult {
   tidy_csv: string;
   notes: string;
   model: string;
+  /** Which path produced this: the 3-step pipeline, or the single-pass fallback. */
+  method?: 'pipeline' | 'single';
+  /** Per-step log from the generated cleaning code (pipeline path only). */
+  log?: string[];
+  /** The pandas code the model generated and the adapter ran (pipeline path). */
+  code?: string;
+  /** Step 1 (diagnose) and step 2 (strategy) outputs, for transparency. */
+  diagnosis?: unknown;
+  strategy?: unknown;
+  /** Why the pipeline fell back to single-pass, if it did. */
+  fallback_reason?: string;
 }
 
 export interface TidyHealth {

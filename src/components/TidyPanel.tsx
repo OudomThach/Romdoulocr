@@ -166,9 +166,54 @@ export function TidyPanel({
               </tbody>
             </table>
           </div>
-          <div className="text-[11px] text-slate-400">
-            {result.rows.length} rows × {result.columns.length} columns · via {result.model}
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+            <span>
+              {result.rows.length} rows × {result.columns.length} columns · via {result.model}
+            </span>
+            {result.method && (
+              <span
+                className={`rounded-full px-2 py-0.5 font-medium ${
+                  result.method === 'pipeline'
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'bg-amber-50 text-amber-700'
+                }`}
+              >
+                {result.method === 'pipeline' ? '3-step pipeline' : 'single-pass fallback'}
+              </span>
+            )}
           </div>
+
+          {((result.log && result.log.length > 0) || result.code) && (
+            <details className="rounded-lg border border-slate-200 bg-white">
+              <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-700">
+                How it was cleaned
+              </summary>
+              <div className="space-y-3 border-t border-slate-100 px-4 py-3">
+                {result.fallback_reason && (
+                  <div className="text-xs text-amber-700">
+                    Pipeline fell back to single-pass: {result.fallback_reason}
+                  </div>
+                )}
+                {result.log && result.log.length > 0 && (
+                  <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-600">
+                    {result.log.map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ol>
+                )}
+                {result.code && (
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Generated pandas code
+                    </div>
+                    <pre className="max-h-64 overflow-auto rounded-md bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-100">
+                      {result.code}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
         </>
       )}
     </div>

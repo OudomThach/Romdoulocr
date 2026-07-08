@@ -11,3 +11,5 @@ Thumbs.db
 .idea/
 *.log
 *.tsbuildinfo
+__pycache__/
+*.pyc
