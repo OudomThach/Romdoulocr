@@ -6,6 +6,7 @@ import { FileReadyPanel } from '@/components/FileReadyPanel';
 import { MarkdownView } from '@/components/MarkdownView';
 import { ProgressBar } from '@/components/ProgressBar';
 import { TableGrid } from '@/components/TableGrid';
+import { TidyPanel } from '@/components/TidyPanel';
 import { ZoomableImage } from '@/components/PagePreview';
 import { ResultStepper } from '@/components/ResultStepper';
 import { useBatchProcessor } from '@/hooks/useBatchProcessor';
@@ -30,7 +31,7 @@ interface PreparedFile {
   totalPages: number;
 }
 
-type ResultView = 'preview' | 'markdown' | 'csv';
+type ResultView = 'preview' | 'markdown' | 'csv' | 'tidy';
 type MarkdownMode = 'preview' | 'source';
 
 export function TableParserTab() {
@@ -576,8 +577,16 @@ function TableExtractionResultsCard({
           label={`CSV Tables (${result ? 1 : 0})`}
           onClick={() => onResultViewChange('csv')}
         />
+        <ResultTab
+          active={resultView === 'tidy'}
+          icon={<SparkleIcon className="h-4 w-4" />}
+          label="Tidy"
+          onClick={() => onResultViewChange('tidy')}
+        />
       </div>
 
+      {resultView !== 'tidy' && (
+      <>
       <div className="mt-6 rounded-lg border border-slate-200 bg-white px-3 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -671,12 +680,16 @@ function TableExtractionResultsCard({
           </button>
         </div>
       </div>
+      </>
+      )}
 
       <div className="min-h-0 flex-1 pt-4">
         {!result ? (
           <EmptyResults />
         ) : resultView === 'preview' ? (
           <PreviewPane result={result} uploadPreviewUrl={uploadPreviewUrl} />
+        ) : resultView === 'tidy' ? (
+          <TidyPanel markdown={editedMarkdown} filenameBase={filenameBase} />
         ) : (
           // Grid / Markdown views: keep the SOURCE IMAGE alongside the data so
           // the photo is always visible, not hidden behind the Preview tab.
@@ -1026,6 +1039,15 @@ function GridIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M4 5h16M4 12h16M4 19h16M8 5v14M16 5v14" />
+    </svg>
+  );
+}
+
+function SparkleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z" strokeLinejoin="round" />
+      <path d="M19 15l.8 2 .2.8-2 .8L17 19.8 16.2 18l-2-.8 2-.8L17 14.2 19 15Z" strokeLinejoin="round" />
     </svg>
   );
 }

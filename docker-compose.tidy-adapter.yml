@@ -1,0 +1,40 @@
+# Transform-to-tidy adapter for the Romdoul OCR SPA.
+#
+# Reshapes an OCR-extracted Markdown table into "tidy data" (Hadley Wickham) via
+# an LLM — Google Gemini or Anthropic Claude. The SPA reaches it at /api-tidy/*
+# — nginx routes there by container name over the shared Docker network (same
+# pattern as the vLLM and Lens adapters). No GPU; needs outbound internet.
+#
+# Deploy:  docker compose -f docker-compose.tidy-adapter.yml up -d --build
+#
+# TIDY_MODEL picks the provider: a "gemini-*" name uses GEMINI_API_KEY; anything
+# else uses ANTHROPIC_API_KEY. Default is gemini-2.5-flash. Keys + model live in
+# the gitignored root .env. ADAPTER_TOKEN (also from .env) gates it.
+
+name: tidy-adapter
+
+services:
+  tidy-adapter:
+    build:
+      context: ./tidy-adapter
+      dockerfile: Dockerfile
+    image: tidy-adapter:latest
+    container_name: tidy-adapter
+    environment:
+      TIDY_MODEL: ${TIDY_MODEL:-gemini-2.5-flash}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
+    ports:
+      - "${TIDY_ADAPTER_PORT:-8092}:8092"
+    networks:
+      - ocrapi_default
+    restart: unless-stopped
+
+networks:
+  # The khmer-parser-ui compose project's default network, so nginx can resolve
+  # `tidy-adapter` by container name. (Project dir is `ocrapi_backup` → network
+  # name `ocrapi_backup_default`; adjust if your compose project name differs.)
+  ocrapi_default:
+    external: true
+    name: ocrapi_backup_default
