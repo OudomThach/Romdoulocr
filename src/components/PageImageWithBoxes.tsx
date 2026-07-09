@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { LayoutRegion, PageResult } from '@/types/api';
 import { bboxToPct, colorForRegion, fmtPct } from '@/lib/utils';
+import { RegionReadButton } from '@/components/RegionReocr';
+import type { BackendId } from '@/lib/backend';
 
 export interface PageImageWithBoxesProps {
   page: PageResult;
@@ -9,6 +11,8 @@ export interface PageImageWithBoxesProps {
   maxHeight?: string;
   onHoverRegion?: (index: number | null) => void;
   hoverIdx?: number | null;
+  /** Backend for the "Read area" crop; defaults to the active OCR backend. */
+  regionBackend?: BackendId;
 }
 
 export function PageImageWithBoxes({
@@ -18,6 +22,7 @@ export function PageImageWithBoxes({
   maxHeight = '700px',
   onHoverRegion,
   hoverIdx,
+  regionBackend,
 }: PageImageWithBoxesProps) {
   const [internalHover, setInternalHover] = useState<number | null>(null);
   const activeIdx = hoverIdx ?? internalHover;
@@ -28,9 +33,14 @@ export function PageImageWithBoxes({
 
   return (
     <div
-      className="overflow-auto rounded-lg border border-ink-800 bg-ink-950"
+      className="relative overflow-auto rounded-lg border border-ink-800 bg-ink-950"
       style={{ maxHeight }}
     >
+      {imageUrl && (
+        <div className="absolute right-2 top-2 z-20">
+          <RegionReadButton imageUrl={imageUrl} backend={regionBackend} variant="solid" />
+        </div>
+      )}
       <div className="min-w-fit p-2">
         <div
           className="relative mx-auto"

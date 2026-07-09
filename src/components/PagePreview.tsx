@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { RegionReadButton } from '@/components/RegionReocr';
+import type { BackendId } from '@/lib/backend';
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
@@ -15,6 +17,13 @@ export interface ZoomableImageProps {
    * Defaults to true.
    */
   enableKeyboard?: boolean;
+  /**
+   * Show the "Read area" crop button in the controls (defaults to true when an
+   * image is present). The region read uses `regionBackend` or, if omitted, the
+   * currently-active OCR backend.
+   */
+  allowRegionRead?: boolean;
+  regionBackend?: BackendId;
 }
 
 /**
@@ -28,6 +37,8 @@ export function ZoomableImage({
   emptyMessage = 'No image preview available.',
   minHeightClass = 'min-h-[520px]',
   enableKeyboard = true,
+  allowRegionRead = true,
+  regionBackend,
 }: ZoomableImageProps) {
   const [zoom, setZoom] = useState(1);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -81,6 +92,12 @@ export function ZoomableImage({
     >
       {imageUrl && (
         <div className="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white/95 px-1.5 py-1 text-sm text-slate-700 shadow-sm backdrop-blur">
+          {allowRegionRead && (
+            <>
+              <RegionReadButton imageUrl={imageUrl} backend={regionBackend} variant="chip" />
+              <span className="mx-0.5 h-5 w-px bg-slate-200" aria-hidden="true" />
+            </>
+          )}
           <button
             type="button"
             onClick={zoomOut}
