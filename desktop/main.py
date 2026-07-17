@@ -65,15 +65,30 @@ def spawn_app_window(url: str) -> None:
 _overlay_active = threading.Event()
 
 
-def _autosave(cfg: config_mod.Config, png: bytes) -> None:
+def _autosave_pair(cfg: config_mod.Config, png: bytes, text: str) -> None:
+    """Auto-save a snip: PNG (+ matching .txt when save_text) into save_dir."""
     if not cfg.save_dir:
         return
     try:
         from datetime import datetime
         os.makedirs(cfg.save_dir, exist_ok=True)
-        name = "romdoul-snip-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".png"
-        with open(os.path.join(cfg.save_dir, name), "wb") as fh:
+        stem = "romdoul-snip-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+        with open(os.path.join(cfg.save_dir, stem + ".png"), "wb") as fh:
             fh.write(png)
+        if cfg.save_text:
+            with open(os.path.join(cfg.save_dir, stem + ".txt"), "w", encoding="utf-8") as fh:
+                fh.write(text or "")
+    except Exception:
+        pass
+
+
+def _autosave_text_named(cfg: config_mod.Config, stem: str, text: str) -> None:
+    if not (cfg.save_dir and cfg.save_text):
+        return
+    try:
+        os.makedirs(cfg.save_dir, exist_ok=True)
+        with open(os.path.join(cfg.save_dir, stem + ".txt"), "w", encoding="utf-8") as fh:
+            fh.write(text or "")
     except Exception:
         pass
 
@@ -85,8 +100,27 @@ def _ocr_then_preview(gui, cfg, server_url, png: bytes) -> None:
         text = ocr.ocr_image(png, server_url, cfg.prefix())
     except Exception as exc:
         text = f"[OCR failed]\n\n{exc}\n\nCheck your internet / that the PC is on."
+    _autosave_pair(cfg, png, text)
     import snipper
-    gui.post(lambda: snipper.open_preview(gui.root, png, text, cfg.save_dir))
+    gui.post(lambda: snipper.open_preview(gui.root, png, text, cfg.save_dir, cfg.backend))
+
+
+def _batch_ocr(gui, cfg, server_url, images: list) -> None:
+    """OCR many image files, auto-save each .txt, then show one batch window."""
+    import ocr
+    import snipper
+    items = []
+    for path in images:
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+            text = ocr.ocr_image(data, server_url, cfg.prefix())
+        except Exception as exc:
+            text = f"[OCR failed] {exc}"
+        name = os.path.basename(path)
+        items.append({"name": name, "text": text})
+        _autosave_text_named(cfg, os.path.splitext(name)[0], text)
+    gui.post(lambda: snipper.open_batch(gui.root, items, cfg.save_dir, cfg.backend))
 
 
 def trigger_snip(gui, get_cfg, server_url) -> None:
@@ -99,7 +133,6 @@ def trigger_snip(gui, get_cfg, server_url) -> None:
         if not png:
             return
         cfg = get_cfg()
-        _autosave(cfg, png)
         threading.Thread(target=_ocr_then_preview, args=(gui, cfg, server_url, png),
                          daemon=True).start()
 
@@ -110,24 +143,29 @@ def trigger_snip(gui, get_cfg, server_url) -> None:
 def trigger_read_file(gui, get_cfg, server_url) -> None:
     def pick():
         from tkinter import filedialog
-        path = filedialog.askopenfilename(
-            parent=gui.root, title="Read an image or PDF",
+        paths = filedialog.askopenfilenames(
+            parent=gui.root, title="Read images or a PDF (pick one or many)",
             filetypes=[("Images & PDF", "*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.pdf"),
                        ("All files", "*.*")],
         )
-        if not path:
+        if not paths:
             return
-        ext = os.path.splitext(path)[1].lower()
-        if ext == ".pdf":
+        paths = list(paths)
+        pdfs = [p for p in paths if p.lower().endswith(".pdf")]
+        images = [p for p in paths if os.path.splitext(p)[1].lower() in IMAGE_EXTS]
+        if pdfs:
             spawn_app_window(server_url)  # PDFs use the full multi-page app flow
+        if not images:
             return
-        if ext not in IMAGE_EXTS:
-            return
-        with open(path, "rb") as fh:
-            data = fh.read()
         cfg = get_cfg()
-        threading.Thread(target=_ocr_then_preview, args=(gui, cfg, server_url, data),
-                         daemon=True).start()
+        if len(images) == 1:
+            with open(images[0], "rb") as fh:
+                data = fh.read()
+            threading.Thread(target=_ocr_then_preview, args=(gui, cfg, server_url, data),
+                             daemon=True).start()
+        else:
+            threading.Thread(target=_batch_ocr, args=(gui, cfg, server_url, images),
+                             daemon=True).start()
 
     gui.post(pick)
 

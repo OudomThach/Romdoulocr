@@ -65,6 +65,13 @@ def open_settings(parent, cfg: cfg_mod.Config, on_saved: Callable[[cfg_mod.Confi
     tk.Button(save_row, text="Browse…", command=browse, bg="#1e293b", fg="white",
               relief="flat", font=("Segoe UI", 10), padx=10).pack(side="left", padx=(8, 0))
 
+    save_text_var = tk.BooleanVar(value=cfg.save_text)
+    tk.Checkbutton(root, text="Also save the recognized text (.txt) next to each image",
+                   variable=save_text_var, bg="#0b1220", fg="#cbd5e1",
+                   selectcolor="#0f172a", activebackground="#0b1220",
+                   activeforeground="white", font=("Segoe UI", 9), anchor="w"
+                   ).pack(fill="x", padx=16, pady=(6, 0))
+
     label("Home server URL (Tailscale Funnel or LAN)")
     base_var = tk.StringVar(value=cfg.funnel_base)
     tk.Entry(root, textvariable=base_var, font=("Consolas", 10),
@@ -79,6 +86,7 @@ def open_settings(parent, cfg: cfg_mod.Config, on_saved: Callable[[cfg_mod.Confi
             port=cfg.port,
             open_app_on_start=cfg.open_app_on_start,
             save_dir=save_var.get().strip(),
+            save_text=save_text_var.get(),
         )
         try:
             import keyboard  # validate the combo before committing

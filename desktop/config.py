@@ -51,6 +51,8 @@ class Config:
     # Folder to auto-save every screenshot PNG into. Empty = don't auto-save
     # (the user can still Save… manually from the result window).
     save_dir: str = ""
+    # When save_dir is set, also drop the OCR text as a .txt next to each image.
+    save_text: bool = True
 
     def prefix(self) -> str:
         return BACKEND_PREFIX.get(self.backend, "/api-lens")
