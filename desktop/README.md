@@ -42,9 +42,10 @@ cd desktop
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Output: **`out\RomdoulOCR\RomdoulOCR.exe`**. Zip the whole `out\RomdoulOCR\`
-folder and hand it to any Windows PC — they just run the `.exe`, no install.
-(Windows 11 already has the WebView2 runtime; on older machines it auto-installs.)
+Output: **`out\RomdoulOCR.exe`** — **one single file** with the app icon. Send
+just that `.exe` to any Windows PC and double-click it, no install and nothing
+else to copy. (Windows 11 already has the WebView2 runtime; older machines
+auto-install it.) First launch takes a few seconds while it unpacks.
 
 ## Updates ("Check for updates" in the tray)
 

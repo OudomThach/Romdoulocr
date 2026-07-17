@@ -174,7 +174,15 @@ def trigger_read_file(gui, get_cfg, server_url) -> None:
 # Tray
 # --------------------------------------------------------------------------- #
 def _tray_image():
-    from PIL import Image, ImageDraw
+    from PIL import Image
+    # Prefer the real app icon (the flower); fall back to a simple drawn mark.
+    try:
+        p = resource_path(os.path.join("assets", "icon.ico"))
+        if os.path.exists(p):
+            return Image.open(p)
+    except Exception:
+        pass
+    from PIL import ImageDraw
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([4, 4, 60, 60], radius=14, fill=(11, 18, 32, 255),

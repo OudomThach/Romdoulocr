@@ -21,10 +21,13 @@ Write-Host '== Installing Python deps ==' -ForegroundColor Cyan
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
-Write-Host '== Building the portable .exe ==' -ForegroundColor Cyan
+Write-Host '== Generating app icon ==' -ForegroundColor Cyan
+python make_icon.py
+
+Write-Host '== Building the single-file .exe ==' -ForegroundColor Cyan
 python -m PyInstaller RomdoulOCR.spec --noconfirm --distpath out --workpath build
 
 Write-Host ''
 Write-Host 'DONE.' -ForegroundColor Green
-Write-Host 'Portable app:  out\RomdoulOCR\RomdoulOCR.exe' -ForegroundColor Green
-Write-Host 'Zip the whole out\RomdoulOCR\ folder to hand it to another PC.' -ForegroundColor Green
+Write-Host 'Portable app:  out\RomdoulOCR.exe  (one file, with the app icon)' -ForegroundColor Green
+Write-Host 'Just send that single .exe to another PC - nothing else needed.' -ForegroundColor Green

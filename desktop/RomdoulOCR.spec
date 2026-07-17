@@ -1,11 +1,11 @@
 # PyInstaller spec for the portable Romdoul OCR desktop app.
 # Build:  python -m PyInstaller RomdoulOCR.spec --noconfirm --distpath out --workpath build
-# Output: out/RomdoulOCR/RomdoulOCR.exe  (a self-contained portable folder)
+# Output: out/RomdoulOCR.exe  (ONE self-contained file — open the folder, see the app icon)
 
 from PyInstaller.utils.hooks import collect_all
 
-# Bundle the built web UI so the app is fully self-contained.
-datas = [('webui', 'webui')]
+# Bundle the built web UI + the app icon so everything ships in the one .exe.
+datas = [('webui', 'webui'), ('assets/icon.ico', 'assets')]
 binaries = []
 hiddenimports = ['clr']
 
@@ -46,27 +46,21 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# ONE-FILE build: binaries + data folded into a single RomdoulOCR.exe, so the
+# distributed folder contains just the app (with its icon) — nothing else to see.
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='RomdoulOCR',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    runtime_tmpdir=None,
     console=False,           # no console window (it's a GUI/tray app)
     disable_windowed_traceback=False,
-    icon='assets/icon.ico' if __import__('os').path.exists('assets/icon.ico') else None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='RomdoulOCR',
+    icon='assets/icon.ico',
 )
