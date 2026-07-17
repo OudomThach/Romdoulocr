@@ -239,6 +239,37 @@ def main() -> None:
         import settings_window
         gui.post(lambda: settings_window.open_settings(gui.root, get_cfg(), saved))
 
+    def on_update(*_):
+        def work():
+            import updater
+            import version
+            res = updater.check(version.VERSION)
+
+            def show():
+                from tkinter import messagebox
+                import webbrowser
+                parent = gui.root
+                if res["status"] == "update":
+                    if messagebox.askyesno(
+                        "Update available",
+                        f"Version {res['latest']} is available (you have {version.VERSION}).\n\n"
+                        "Download it now?", parent=parent):
+                        webbrowser.open(res["url"])
+                elif res["status"] == "current":
+                    messagebox.showinfo(
+                        "Romdoul OCR",
+                        f"You're on the latest version ({version.VERSION}).", parent=parent)
+                else:
+                    if messagebox.askyesno(
+                        "Check for updates",
+                        f"Couldn't check automatically ({res.get('error', '')}).\n\n"
+                        "Open the GitHub releases page?", parent=parent):
+                        webbrowser.open(version.RELEASES_PAGE)
+
+            gui.post(show)
+
+        threading.Thread(target=work, daemon=True).start()
+
     def on_quit(icon, *_):
         try:
             srv.stop()
@@ -246,11 +277,15 @@ def main() -> None:
             pass
         icon.stop()
 
+    import version
     menu = pystray.Menu(
+        pystray.MenuItem(f"Romdoul OCR  v{version.VERSION}", None, enabled=False),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem("Open Romdoul OCR", on_open, default=True),
         pystray.MenuItem(f"Snip & read  ({cfg.hotkey})", on_snip),
         pystray.MenuItem("Read image / PDF file…", on_read),
         pystray.MenuItem("Settings…", on_settings),
+        pystray.MenuItem("Check for updates…", on_update),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", on_quit),
     )

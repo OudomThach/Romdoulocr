@@ -46,6 +46,23 @@ Output: **`out\RomdoulOCR\RomdoulOCR.exe`**. Zip the whole `out\RomdoulOCR\`
 folder and hand it to any Windows PC — they just run the `.exe`, no install.
 (Windows 11 already has the WebView2 runtime; on older machines it auto-installs.)
 
+## Updates ("Check for updates" in the tray)
+
+The tray shows the version and has **Check for updates…**. It asks GitHub for the
+latest **Release** and, if newer than the running build, offers to download it.
+
+Because the repo is **private**, the public API can't read it without a token
+(which we never embed), so on a private repo the check gracefully falls back to
+**opening the releases page** in your browser. To enable real auto-compare:
+
+1. Bump `VERSION` in `desktop/version.py` before building.
+2. Build (`build.ps1`), zip `out\RomdoulOCR\`.
+3. On GitHub → **Releases → Draft a new release**, tag it `v1.0.1` (matching the
+   bumped version), attach the zip, publish.
+
+Either make the repo/releases public for others to auto-update, or (private) the
+owner just uses the "open releases page" fallback while signed in.
+
 ## Update the bundled UI
 
 `build.ps1` re-copies the latest UI from the running `khmer-parser-ui` container.
