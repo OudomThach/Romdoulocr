@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 import config as cfg_mod
+import dpi
 
 ACCENT = "#00e5ff"
 BACKENDS = [("Google Lens", "lens"), ("Surya (default)", "default"), ("vLLM", "vllm")]
@@ -20,7 +21,7 @@ BACKENDS = [("Google Lens", "lens"), ("Surya (default)", "default"), ("vLLM", "v
 def open_settings(parent, cfg: cfg_mod.Config, on_saved: Callable[[cfg_mod.Config], None]) -> None:
     root = tk.Toplevel(parent)
     root.title("Romdoul OCR — Settings")
-    root.geometry("480x480")
+    root.geometry(f"{dpi.px(480)}x{dpi.px(480)}")
     root.configure(bg="#0b1220")
     root.attributes("-topmost", True)
 

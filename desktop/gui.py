@@ -32,6 +32,8 @@ class Gui:
     def _run(self) -> None:
         self.root = tk.Tk()
         self.root.withdraw()  # the root itself is never shown
+        import dpi
+        dpi.apply_tk_scaling(self.root)  # fonts render right on high-DPI displays
         self.root.after(40, self._drain)
         self._ready.set()
         self.root.mainloop()

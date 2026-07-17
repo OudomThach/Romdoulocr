@@ -18,6 +18,7 @@ from typing import Callable
 import mss
 from PIL import Image, ImageEnhance, ImageTk
 
+import dpi
 import formats
 
 ACCENT = "#00e5ff"
@@ -87,18 +88,21 @@ def open_overlay(root: tk.Tk, on_result: Callable[[bytes | None], None]) -> None
     canvas.create_image(0, 0, anchor="nw", image=dim_photo)
     canvas._dim_ref = dim_photo  # keep a ref so it isn't GC'd
 
-    # Hint pill, centered near the top of the primary monitor.
-    px = width // 2
-    canvas.create_rectangle(px - 190, 22, px + 190, 58, fill=INK, outline=ACCENT, width=1)
-    canvas.create_text(px, 40, fill="#e2e8f0",
+    # Hint pill, centered near the top of the primary monitor. Sizes scale with
+    # the display DPI so it reads the same on 100% and 200%/4K screens.
+    mid = width // 2
+    canvas.create_rectangle(mid - dpi.px(190), dpi.px(20), mid + dpi.px(190), dpi.px(58),
+                            fill=INK, outline=ACCENT, width=1)
+    canvas.create_text(mid, dpi.px(39), fill="#e2e8f0",
                        text="Drag to select   ·   Esc to cancel",
                        font=("Segoe UI", 12, "bold"))
 
-    rect = canvas.create_rectangle(0, 0, 0, 0, outline=ACCENT, width=2, state="hidden")
+    line_w = max(2, dpi.px(2))
+    rect = canvas.create_rectangle(0, 0, 0, 0, outline=ACCENT, width=line_w, state="hidden")
     chip_bg = canvas.create_rectangle(0, 0, 0, 0, fill=ACCENT, outline="", state="hidden")
     chip_tx = canvas.create_text(0, 0, anchor="w", fill="#003", state="hidden",
                                  font=("Segoe UI", 10, "bold"))
-    ticks = [canvas.create_line(0, 0, 0, 0, fill=ACCENT, width=3, state="hidden")
+    ticks = [canvas.create_line(0, 0, 0, 0, fill=ACCENT, width=max(2, dpi.px(3)), state="hidden")
              for _ in range(8)]
 
     def finish(box):
@@ -124,8 +128,8 @@ def open_overlay(root: tk.Tk, on_result: Callable[[bytes | None], None]) -> None
         c, d = max(st["x"], x2), max(st["y"], y2)
         canvas.coords(rect, a, b, c, d)
         canvas.itemconfig(rect, state="normal")
-        # corner ticks (L-shaped, 14px)
-        t = 14
+        # corner ticks (L-shaped), scaled to the display
+        t = dpi.px(14)
         segs = [(a, b, a + t, b), (a, b, a, b + t), (c, b, c - t, b), (c, b, c, b + t),
                 (a, d, a + t, d), (a, d, a, d - t), (c, d, c - t, d), (c, d, c, d - t)]
         for line, (x0, y0, x1_, y1_) in zip(ticks, segs):
@@ -133,10 +137,11 @@ def open_overlay(root: tk.Tk, on_result: Callable[[bytes | None], None]) -> None
             canvas.itemconfig(line, state="normal")
         # size chip above the selection (or below if near the top)
         label = f"{c - a} × {d - b}"
-        cw = len(label) * 9 + 16
-        cy = b - 26 if b > 30 else d + 6
-        canvas.coords(chip_bg, a, cy, a + cw, cy + 20)
-        canvas.coords(chip_tx, a + 8, cy + 10)
+        cw = len(label) * dpi.px(9) + dpi.px(16)
+        ch = dpi.px(22)
+        cy = b - ch - dpi.px(4) if b > dpi.px(30) else d + dpi.px(6)
+        canvas.coords(chip_bg, a, cy, a + cw, cy + ch)
+        canvas.coords(chip_tx, a + dpi.px(8), cy + ch // 2)
         canvas.itemconfig(chip_bg, state="normal")
         canvas.itemconfig(chip_tx, text=label, state="normal")
 
@@ -167,9 +172,9 @@ def open_preview(root: tk.Tk, image_png: bytes | None, text: str, save_dir: str 
     win.configure(bg="#0b1220")
     win.attributes("-topmost", True)
 
-    W, H = 400, 470
+    W, H = dpi.px(400), dpi.px(470)
     sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-    win.geometry(f"{W}x{H}+{max(0, sw - W - 24)}+{max(0, sh - H - 72)}")
+    win.geometry(f"{W}x{H}+{max(0, sw - W - dpi.px(24))}+{max(0, sh - H - dpi.px(72))}")
 
     tk.Label(win, text="Snip result", bg="#0b1220", fg="white",
              font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", padx=12, pady=(10, 6))
@@ -178,7 +183,7 @@ def open_preview(root: tk.Tk, image_png: bytes | None, text: str, save_dir: str 
     if image_png:
         try:
             im = Image.open(io.BytesIO(image_png))
-            im.thumbnail((376, 150))
+            im.thumbnail((dpi.px(376), dpi.px(150)))
             photo = ImageTk.PhotoImage(im)
             thumb = tk.Label(win, image=photo, bg="#0f172a", bd=0)
             thumb.image = photo  # keep a ref so it isn't GC'd
@@ -252,7 +257,7 @@ def open_batch(root: tk.Tk, items: list[dict], save_dir: str = "", backend: str 
     win.title(f"Romdoul OCR — {len(items)} files")
     win.configure(bg="#0b1220")
     win.attributes("-topmost", True)
-    W, H = 560, 600
+    W, H = dpi.px(560), dpi.px(600)
     sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
     win.geometry(f"{W}x{H}+{max(0, (sw - W) // 2)}+{max(0, (sh - H) // 2)}")
 
