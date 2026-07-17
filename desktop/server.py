@@ -31,17 +31,40 @@ _STRIP = {"host", "content-length", "connection", "keep-alive", "transfer-encodi
 
 
 def _seed_script(backend: str) -> str:
-    # Injected into <head> before the app boots:
-    #  * romdoul.session='guest' EVERY load → the desktop build never shows the
-    #    welcome / login gate (it's a local app, there's nothing to log into).
-    #  * ocr.backend default only if unset, so the user's in-app engine switch
-    #    still wins and persists.
+    # Injected into <head> before the app boots (desktop build only):
+    #  * romdoul.session='guest' EVERY load → never shows the welcome/login gate.
+    #  * ocr.backend default only if unset, so the user's in-app switch persists.
+    #  * a floating "Updates" button in the main interface that calls the local
+    #    /desktop/check-update endpoint (GitHub Releases) — see _check_update.
+    import version
+    releases = version.RELEASES_PAGE
     return (
         "<script>try{"
         "localStorage.setItem('romdoul.session','guest');"
         "if(!localStorage.getItem('ocr.backend'))"
         f"localStorage.setItem('ocr.backend','{backend}');"
         "}catch(e){}</script>"
+        "<script>(function(){function add(){"
+        "if(document.getElementById('rd-upd'))return;"
+        "var b=document.createElement('button');b.id='rd-upd';b.textContent='\\u27f3 Updates';"
+        "b.title='Check for updates';"
+        "b.style.cssText='position:fixed;right:14px;bottom:14px;z-index:2147483647;"
+        "background:#0b1220;color:#00e5ff;border:1px solid #00e5ff;border-radius:10px;"
+        "padding:8px 12px;font:600 12px Segoe UI,system-ui,sans-serif;cursor:pointer;"
+        "opacity:.85;box-shadow:0 2px 10px rgba(0,0,0,.4)';"
+        "b.onmouseenter=function(){b.style.opacity='1'};"
+        "b.onmouseleave=function(){b.style.opacity='.85'};"
+        "b.onclick=async function(){var old=b.textContent;b.textContent='Checking\\u2026';try{"
+        "var j=await (await fetch('/desktop/check-update')).json();"
+        "if(j.status==='update'){if(confirm('Version '+j.latest+' is available. Download now?'))"
+        "window.open(j.url,'_blank');}"
+        "else if(j.status==='current'){alert(\"You're on the latest version (\"+j.latest+\").\");}"
+        "else{if(confirm(\"Couldn't check automatically. Open the releases page?\"))"
+        f"window.open('{releases}','_blank');}}}}catch(e){{window.open('{releases}','_blank');}}"
+        "b.textContent=old;};"
+        "document.body.appendChild(b);}"
+        "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',add);else add();"
+        "})();</script>"
     )
 
 
@@ -82,10 +105,30 @@ def _build_handler(webui_dir: str, funnel_base: str, backend: str):
             return any(path == p or path.startswith(p + "/") for p in PROXY_PREFIXES)
 
         def do_GET(self):
-            if self._is_proxy():
+            if self.path.split("?", 1)[0] == "/desktop/check-update":
+                self._check_update()
+            elif self._is_proxy():
                 self._proxy("GET")
             else:
                 self._static()
+
+        # ---- desktop-only: 'Check for updates' from the main interface -------
+        def _check_update(self):
+            import json as _json
+            import version as _version
+            try:
+                import updater as _updater
+                res = _updater.check(_version.VERSION)
+            except Exception as exc:  # noqa: BLE001
+                res = {"status": "error", "error": str(exc)}
+            res.setdefault("releases", _version.RELEASES_PAGE)
+            res.setdefault("current", _version.VERSION)
+            body = _json.dumps(res).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def do_POST(self):
             if self._is_proxy():
