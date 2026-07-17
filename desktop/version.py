@@ -1,7 +1,7 @@
 """App version + update endpoints for the 'Check for updates' feature."""
 from __future__ import annotations
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 REPO = "OudomThach/Romdoulocr"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 RELEASES_API = f"https://api.github.com/repos/{REPO}/releases/latest"
