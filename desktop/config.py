@@ -45,8 +45,9 @@ class Config:
     funnel_base: str = DEFAULT_FUNNEL_BASE
     # Local static+proxy server port. 0 = pick a free port automatically.
     port: int = 0
-    # Open the main app window automatically on launch.
-    open_app_on_start: bool = True
+    # Open the big app window automatically on launch. Default False = start as a
+    # quiet background service (tray + hotkey); open the full window on demand.
+    open_app_on_start: bool = False
     # Folder to auto-save every screenshot PNG into. Empty = don't auto-save
     # (the user can still Save… manually from the result window).
     save_dir: str = ""

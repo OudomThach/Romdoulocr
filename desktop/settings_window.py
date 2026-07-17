@@ -17,8 +17,8 @@ ACCENT = "#00e5ff"
 BACKENDS = [("Google Lens", "lens"), ("Surya (default)", "default"), ("vLLM", "vllm")]
 
 
-def open_settings(cfg: cfg_mod.Config, on_saved: Callable[[cfg_mod.Config], None]) -> None:
-    root = tk.Tk()
+def open_settings(parent, cfg: cfg_mod.Config, on_saved: Callable[[cfg_mod.Config], None]) -> None:
+    root = tk.Toplevel(parent)
     root.title("Romdoul OCR — Settings")
     root.geometry("480x480")
     root.configure(bg="#0b1220")
@@ -99,7 +99,6 @@ def open_settings(cfg: cfg_mod.Config, on_saved: Callable[[cfg_mod.Config], None
               ).pack(side="right", padx=(0, 8))
 
     root.focus_force()
-    root.mainloop()
 
 
 def _label_for(value: str) -> str:

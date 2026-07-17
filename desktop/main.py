@@ -2,15 +2,15 @@
 Romdoul OCR — portable Windows app. Entry point / background controller.
 
 Two modes in one executable:
-  * default            → the controller: starts the local server, shows a tray
-                         icon, registers the global screenshot hotkey, and (by
-                         default) opens the main app window.
-  * --appwindow --url  → just the pywebview app window, run as a child process so
-                         closing it doesn't kill the controller.
+  * default            → a quiet BACKGROUND SERVICE: local server + system-tray
+                         icon + global screenshot hotkey. No giant window on
+                         launch; you snip anywhere or open the app on demand.
+  * --appwindow --url  → the full app in a pywebview window, run as a child
+                         process so closing it never kills the background service.
 
-The controller keeps the tray + hotkey alive in the background even when the app
-window is closed, so the "snip anywhere" hotkey always works — like a real
-Windows utility.
+All on-screen UI (snip overlay, the compact result preview, settings) are small
+Toplevels on one hidden Tk root managed by gui.Gui — so many little windows can
+coexist and open instantly instead of one big blocking window.
 """
 from __future__ import annotations
 
@@ -21,18 +21,18 @@ import threading
 
 import config as config_mod
 
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif")
+
 
 # --------------------------------------------------------------------------- #
 # Paths / DPI
 # --------------------------------------------------------------------------- #
 def resource_path(rel: str) -> str:
-    """Path to a bundled resource, working both in dev and inside PyInstaller."""
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, rel)
 
 
 def set_dpi_aware() -> None:
-    """So Tk widget coords match the physical pixels mss captures (per-monitor v2)."""
     try:
         import ctypes
         try:
@@ -60,15 +60,12 @@ def spawn_app_window(url: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Snip flow (worker thread)
+# Snip / file OCR flows (open small windows on the GUI thread)
 # --------------------------------------------------------------------------- #
-_snip_lock = threading.Lock()
-
-IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif")
+_overlay_active = threading.Event()
 
 
 def _autosave(cfg: config_mod.Config, png: bytes) -> None:
-    """Drop the screenshot into the user's chosen folder, if they set one."""
     if not cfg.save_dir:
         return
     try:
@@ -81,61 +78,62 @@ def _autosave(cfg: config_mod.Config, png: bytes) -> None:
         pass
 
 
-def run_snip(cfg: config_mod.Config, server_url: str) -> None:
-    if not _snip_lock.acquire(blocking=False):
-        return  # a snip is already in progress
-    try:
-        import snipper
-        png = snipper.capture_and_select()
-        if not png:
-            return
-        _autosave(cfg, png)
-        try:
-            import ocr
-            text = ocr.ocr_image(png, server_url, cfg.prefix())
-        except Exception as exc:  # network / backend down
-            text = f"[OCR failed]\n\n{exc}\n\nCheck your internet / that the PC is on."
-        snipper.show_result(text, image_png=png, save_dir=cfg.save_dir)
-    finally:
-        _snip_lock.release()
-
-
-def read_file_flow(cfg: config_mod.Config, server_url: str) -> None:
-    """Tray 'Read a file…' — OCR an image file directly, or open PDFs in the app."""
-    import tkinter as tk
-    from tkinter import filedialog
-
-    picker = tk.Tk()
-    picker.withdraw()
-    picker.attributes("-topmost", True)
-    path = filedialog.askopenfilename(
-        parent=picker, title="Read an image or PDF",
-        filetypes=[("Images & PDF", "*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.pdf"),
-                   ("All files", "*.*")],
-    )
-    picker.destroy()
-    if not path:
-        return
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".pdf":
-        # Multi-page PDFs use the full app flow (page select, tables, translate).
-        spawn_app_window(server_url)
-        return
-    if ext not in IMAGE_EXTS:
-        return
-    with open(path, "rb") as fh:
-        data = fh.read()
-    import snipper
+def _ocr_then_preview(gui, cfg, server_url, png: bytes) -> None:
+    """Runs on a worker thread: OCR the crop, then post a preview to the GUI."""
     try:
         import ocr
-        text = ocr.ocr_image(data, server_url, cfg.prefix())
+        text = ocr.ocr_image(png, server_url, cfg.prefix())
     except Exception as exc:
-        text = f"[OCR failed]\n\n{exc}"
-    snipper.show_result(text, image_png=data, save_dir=cfg.save_dir)
+        text = f"[OCR failed]\n\n{exc}\n\nCheck your internet / that the PC is on."
+    import snipper
+    gui.post(lambda: snipper.open_preview(gui.root, png, text, cfg.save_dir))
+
+
+def trigger_snip(gui, get_cfg, server_url) -> None:
+    if _overlay_active.is_set():
+        return  # one overlay at a time
+    _overlay_active.set()
+
+    def on_capture(png):
+        _overlay_active.clear()
+        if not png:
+            return
+        cfg = get_cfg()
+        _autosave(cfg, png)
+        threading.Thread(target=_ocr_then_preview, args=(gui, cfg, server_url, png),
+                         daemon=True).start()
+
+    import snipper
+    gui.post(lambda: snipper.open_overlay(gui.root, on_capture))
+
+
+def trigger_read_file(gui, get_cfg, server_url) -> None:
+    def pick():
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            parent=gui.root, title="Read an image or PDF",
+            filetypes=[("Images & PDF", "*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.pdf"),
+                       ("All files", "*.*")],
+        )
+        if not path:
+            return
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".pdf":
+            spawn_app_window(server_url)  # PDFs use the full multi-page app flow
+            return
+        if ext not in IMAGE_EXTS:
+            return
+        with open(path, "rb") as fh:
+            data = fh.read()
+        cfg = get_cfg()
+        threading.Thread(target=_ocr_then_preview, args=(gui, cfg, server_url, data),
+                         daemon=True).start()
+
+    gui.post(pick)
 
 
 # --------------------------------------------------------------------------- #
-# Tray icon
+# Tray
 # --------------------------------------------------------------------------- #
 def _tray_image():
     from PIL import Image, ImageDraw
@@ -143,7 +141,7 @@ def _tray_image():
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([4, 4, 60, 60], radius=14, fill=(11, 18, 32, 255),
                         outline=(0, 229, 255, 255), width=3)
-    d.text((22, 18), "R", fill=(0, 229, 255, 255))
+    d.text((24, 18), "R", fill=(0, 229, 255, 255))
     return img
 
 
@@ -151,14 +149,19 @@ def main() -> None:
     set_dpi_aware()
     cfg = config_mod.load()
 
-    # Start the local static + proxy server.
     import server
     srv = server.LocalServer(resource_path("webui"), cfg.funnel_base, cfg.backend, cfg.port)
     server_url = srv.start()
 
-    # Global screenshot hotkey (re-registerable when settings change).
+    import gui as gui_mod
+    gui = gui_mod.Gui()
+    gui.start()
+
+    cfg_state = {"cfg": cfg}
+    get_cfg = lambda: cfg_state["cfg"]  # noqa: E731
+
     import keyboard
-    hotkey_ref: dict[str, object] = {"handle": None}
+    hotkey_ref = {"handle": None}
 
     def register_hotkey(combo: str):
         if hotkey_ref["handle"] is not None:
@@ -167,46 +170,38 @@ def main() -> None:
             except Exception:
                 pass
         hotkey_ref["handle"] = keyboard.add_hotkey(
-            combo, lambda: threading.Thread(
-                target=run_snip, args=(cfg_state["cfg"], server_url), daemon=True
-            ).start()
+            combo, lambda: trigger_snip(gui, get_cfg, server_url)
         )
 
-    cfg_state = {"cfg": cfg}
     try:
         register_hotkey(cfg.hotkey)
     except Exception:
         pass
 
-    # Tray icon + menu.
     import pystray
 
-    def on_open(_i=None, _item=None):
+    def on_open(*_):
         spawn_app_window(server_url)
 
-    def on_snip(_i=None, _item=None):
-        threading.Thread(target=run_snip, args=(cfg_state["cfg"], server_url), daemon=True).start()
+    def on_snip(*_):
+        trigger_snip(gui, get_cfg, server_url)
 
-    def on_read_file(_i=None, _item=None):
-        threading.Thread(target=read_file_flow, args=(cfg_state["cfg"], server_url), daemon=True).start()
+    def on_read(*_):
+        trigger_read_file(gui, get_cfg, server_url)
 
-    def on_settings(_i=None, _item=None):
-        def _open():
-            import settings_window
+    def on_settings(*_):
+        def saved(new_cfg: config_mod.Config):
+            cfg_state["cfg"] = new_cfg
+            srv.backend = new_cfg.backend
+            try:
+                register_hotkey(new_cfg.hotkey)
+            except Exception:
+                pass
 
-            def saved(new_cfg: config_mod.Config):
-                cfg_state["cfg"] = new_cfg
-                srv.backend = new_cfg.backend  # snipper prefix updates immediately
-                try:
-                    register_hotkey(new_cfg.hotkey)
-                except Exception:
-                    pass
+        import settings_window
+        gui.post(lambda: settings_window.open_settings(gui.root, get_cfg(), saved))
 
-            settings_window.open_settings(cfg_state["cfg"], saved)
-
-        threading.Thread(target=_open, daemon=True).start()
-
-    def on_quit(icon, _item=None):
+    def on_quit(icon, *_):
         try:
             srv.stop()
         except Exception:
@@ -216,17 +211,23 @@ def main() -> None:
     menu = pystray.Menu(
         pystray.MenuItem("Open Romdoul OCR", on_open, default=True),
         pystray.MenuItem(f"Snip & read  ({cfg.hotkey})", on_snip),
-        pystray.MenuItem("Read image / PDF file…", on_read_file),
+        pystray.MenuItem("Read image / PDF file…", on_read),
         pystray.MenuItem("Settings…", on_settings),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", on_quit),
     )
     icon = pystray.Icon("RomdoulOCR", _tray_image(), "Romdoul OCR", menu)
 
-    if cfg.open_app_on_start:
-        threading.Timer(0.6, lambda: spawn_app_window(server_url)).start()
+    def setup(ic):
+        ic.visible = True
+        try:
+            ic.notify(f"Running in the tray. Press {get_cfg().hotkey} to snip.", "Romdoul OCR")
+        except Exception:
+            pass
+        if get_cfg().open_app_on_start:
+            spawn_app_window(server_url)
 
-    icon.run()  # blocks the main thread until Quit
+    icon.run(setup=setup)  # blocks the main thread until Quit
 
 
 if __name__ == "__main__":
