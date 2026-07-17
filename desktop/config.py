@@ -47,6 +47,9 @@ class Config:
     port: int = 0
     # Open the main app window automatically on launch.
     open_app_on_start: bool = True
+    # Folder to auto-save every screenshot PNG into. Empty = don't auto-save
+    # (the user can still Save… manually from the result window).
+    save_dir: str = ""
 
     def prefix(self) -> str:
         return BACKEND_PREFIX.get(self.backend, "/api-lens")

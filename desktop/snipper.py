@@ -89,11 +89,14 @@ def capture_and_select() -> bytes | None:
     return buf.getvalue()
 
 
-def show_result(text: str, busy: bool = False) -> None:
-    """Popup showing the OCR text with Copy / Close."""
+def show_result(text: str, image_png: bytes | None = None, save_dir: str = "") -> None:
+    """Popup showing the OCR text with Copy / Save image / Save text / Close."""
+    import os
+    from tkinter import filedialog
+
     root = tk.Tk()
     root.title("Romdoul OCR — snip")
-    root.geometry("580x440")
+    root.geometry("600x500")
     root.attributes("-topmost", True)
     root.configure(bg="#0b1220")
 
@@ -121,6 +124,30 @@ def show_result(text: str, busy: bool = False) -> None:
         copy_btn.config(text="Copied!")
         root.after(1200, lambda: copy_btn.config(text="Copy text"))
 
+    initial_dir = save_dir if (save_dir and os.path.isdir(save_dir)) else os.path.expanduser("~")
+
+    def save_image():
+        if not image_png:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=root, title="Save screenshot", defaultextension=".png",
+            initialdir=initial_dir, initialfile="romdoul-snip.png",
+            filetypes=[("PNG image", "*.png")],
+        )
+        if path:
+            with open(path, "wb") as fh:
+                fh.write(image_png)
+
+    def save_text():
+        path = filedialog.asksaveasfilename(
+            parent=root, title="Save text", defaultextension=".txt",
+            initialdir=initial_dir, initialfile="romdoul-snip.txt",
+            filetypes=[("Text", "*.txt")],
+        )
+        if path:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(txt.get("1.0", "end-1c"))
+
     bar = tk.Frame(root, bg="#0b1220")
     bar.pack(fill="x", padx=14, pady=12)
     copy_btn = tk.Button(
@@ -128,10 +155,17 @@ def show_result(text: str, busy: bool = False) -> None:
         font=("Segoe UI", 11, "bold"), padx=16, pady=6, activebackground="#67e8f9",
     )
     copy_btn.pack(side="right")
-    tk.Button(
-        bar, text="Close", command=root.destroy, bg="#1e293b", fg="white",
-        relief="flat", font=("Segoe UI", 11), padx=16, pady=6,
-    ).pack(side="right", padx=(0, 8))
+
+    def ghost(label, cmd):
+        return tk.Button(
+            bar, text=label, command=cmd, bg="#1e293b", fg="white", relief="flat",
+            font=("Segoe UI", 11), padx=14, pady=6, activebackground="#334155",
+        )
+
+    ghost("Close", root.destroy).pack(side="right", padx=(0, 8))
+    ghost("Save text…", save_text).pack(side="right", padx=(0, 8))
+    if image_png:
+        ghost("Save image…", save_image).pack(side="right", padx=(0, 8))
 
     root.focus_force()
     root.mainloop()

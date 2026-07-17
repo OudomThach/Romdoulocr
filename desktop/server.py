@@ -31,11 +31,17 @@ _STRIP = {"host", "content-length", "connection", "keep-alive", "transfer-encodi
 
 
 def _seed_script(backend: str) -> str:
-    # Set the default OCR backend only if the user hasn't chosen one yet, so their
-    # in-app switch still wins and persists.
+    # Injected into <head> before the app boots:
+    #  * romdoul.session='guest' EVERY load → the desktop build never shows the
+    #    welcome / login gate (it's a local app, there's nothing to log into).
+    #  * ocr.backend default only if unset, so the user's in-app engine switch
+    #    still wins and persists.
     return (
-        "<script>try{if(!localStorage.getItem('ocr.backend'))"
-        f"localStorage.setItem('ocr.backend','{backend}');}}catch(e){{}}</script>"
+        "<script>try{"
+        "localStorage.setItem('romdoul.session','guest');"
+        "if(!localStorage.getItem('ocr.backend'))"
+        f"localStorage.setItem('ocr.backend','{backend}');"
+        "}catch(e){}</script>"
     )
 
 

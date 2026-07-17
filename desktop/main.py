@@ -64,6 +64,22 @@ def spawn_app_window(url: str) -> None:
 # --------------------------------------------------------------------------- #
 _snip_lock = threading.Lock()
 
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif")
+
+
+def _autosave(cfg: config_mod.Config, png: bytes) -> None:
+    """Drop the screenshot into the user's chosen folder, if they set one."""
+    if not cfg.save_dir:
+        return
+    try:
+        from datetime import datetime
+        os.makedirs(cfg.save_dir, exist_ok=True)
+        name = "romdoul-snip-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".png"
+        with open(os.path.join(cfg.save_dir, name), "wb") as fh:
+            fh.write(png)
+    except Exception:
+        pass
+
 
 def run_snip(cfg: config_mod.Config, server_url: str) -> None:
     if not _snip_lock.acquire(blocking=False):
@@ -73,14 +89,49 @@ def run_snip(cfg: config_mod.Config, server_url: str) -> None:
         png = snipper.capture_and_select()
         if not png:
             return
+        _autosave(cfg, png)
         try:
             import ocr
             text = ocr.ocr_image(png, server_url, cfg.prefix())
         except Exception as exc:  # network / backend down
             text = f"[OCR failed]\n\n{exc}\n\nCheck your internet / that the PC is on."
-        snipper.show_result(text)
+        snipper.show_result(text, image_png=png, save_dir=cfg.save_dir)
     finally:
         _snip_lock.release()
+
+
+def read_file_flow(cfg: config_mod.Config, server_url: str) -> None:
+    """Tray 'Read a file…' — OCR an image file directly, or open PDFs in the app."""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    picker = tk.Tk()
+    picker.withdraw()
+    picker.attributes("-topmost", True)
+    path = filedialog.askopenfilename(
+        parent=picker, title="Read an image or PDF",
+        filetypes=[("Images & PDF", "*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.pdf"),
+                   ("All files", "*.*")],
+    )
+    picker.destroy()
+    if not path:
+        return
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".pdf":
+        # Multi-page PDFs use the full app flow (page select, tables, translate).
+        spawn_app_window(server_url)
+        return
+    if ext not in IMAGE_EXTS:
+        return
+    with open(path, "rb") as fh:
+        data = fh.read()
+    import snipper
+    try:
+        import ocr
+        text = ocr.ocr_image(data, server_url, cfg.prefix())
+    except Exception as exc:
+        text = f"[OCR failed]\n\n{exc}"
+    snipper.show_result(text, image_png=data, save_dir=cfg.save_dir)
 
 
 # --------------------------------------------------------------------------- #
@@ -136,6 +187,9 @@ def main() -> None:
     def on_snip(_i=None, _item=None):
         threading.Thread(target=run_snip, args=(cfg_state["cfg"], server_url), daemon=True).start()
 
+    def on_read_file(_i=None, _item=None):
+        threading.Thread(target=read_file_flow, args=(cfg_state["cfg"], server_url), daemon=True).start()
+
     def on_settings(_i=None, _item=None):
         def _open():
             import settings_window
@@ -162,6 +216,7 @@ def main() -> None:
     menu = pystray.Menu(
         pystray.MenuItem("Open Romdoul OCR", on_open, default=True),
         pystray.MenuItem(f"Snip & read  ({cfg.hotkey})", on_snip),
+        pystray.MenuItem("Read image / PDF file…", on_read_file),
         pystray.MenuItem("Settings…", on_settings),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", on_quit),
