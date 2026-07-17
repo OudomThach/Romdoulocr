@@ -1,0 +1,9 @@
+# PyInstaller build artifacts
+build/
+out/
+*.spec.bak
+__pycache__/
+*.pyc
+
+# Bundled UI is copied from the container at build time; keep it out of git.
+webui/

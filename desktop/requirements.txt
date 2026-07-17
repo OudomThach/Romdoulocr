@@ -1,0 +1,11 @@
+# Runtime deps for the portable Romdoul OCR desktop app (Windows).
+pywebview>=4.4          # native app window (uses the WebView2 runtime)
+pythonnet>=3.0          # required by pywebview's Windows EdgeChromium backend
+pystray>=0.19           # system tray icon + menu
+Pillow>=10.0            # tray icon + snip image handling
+mss>=9.0                # fast multi-monitor screen capture
+keyboard>=0.13          # global (system-wide) hotkey
+requests>=2.31          # static-server reverse proxy + OCR upload
+
+# Build-only (produces the .exe); safe to have installed but not bundled:
+pyinstaller>=6.0
