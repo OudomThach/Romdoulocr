@@ -16,7 +16,7 @@ from tkinter import filedialog
 from typing import Callable
 
 import mss
-from PIL import Image, ImageEnhance, ImageTk
+from PIL import Image, ImageTk
 
 import dpi
 import formats
@@ -72,7 +72,6 @@ def open_overlay(root: tk.Tk, on_result: Callable[[bytes | None], None]) -> None
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
     left, top, width, height = mon["left"], mon["top"], mon["width"], mon["height"]
-    dim_img = ImageEnhance.Brightness(img).enhance(0.45)
 
     st: dict = {"x": 0, "y": 0, "done": False, "active": False}
 
@@ -84,9 +83,11 @@ def open_overlay(root: tk.Tk, on_result: Callable[[bytes | None], None]) -> None
     canvas = tk.Canvas(win, bg="black", highlightthickness=0, cursor="crosshair")
     canvas.pack(fill="both", expand=True)
 
-    dim_photo = ImageTk.PhotoImage(dim_img)
-    canvas.create_image(0, 0, anchor="nw", image=dim_photo)
-    canvas._dim_ref = dim_photo  # keep a ref so it isn't GC'd
+    # Show the screen at FULL, normal brightness (no dim) — just a crisp selection
+    # box drawn on top. The frozen shot keeps the picture steady while you drag.
+    photo = ImageTk.PhotoImage(img)
+    canvas.create_image(0, 0, anchor="nw", image=photo)
+    canvas._bg_ref = photo  # keep a ref so it isn't GC'd
 
     # Hint pill, centered near the top of the primary monitor. Sizes scale with
     # the display DPI so it reads the same on 100% and 200%/4K screens.
