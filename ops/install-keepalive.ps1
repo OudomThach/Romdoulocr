@@ -7,7 +7,7 @@
   It will, as Administrator:
     1. Stop the PC from sleeping (powercfg, while on AC power).
     2. Register the "RomdoulKeepAlive" scheduled task (runs at logon AND every
-       5 minutes) so the watchdog keeps the stack alive automatically.
+       2 minutes) so the watchdog keeps the stack alive automatically.
     3. Run the watchdog once now to bring everything up.
 
   Re-running is safe (idempotent). ASCII / Windows PowerShell 5.1 compatible.
