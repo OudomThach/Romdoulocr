@@ -3,17 +3,24 @@ import type { HealthCheckResponse } from '@/types/api';
 import { baseUrlFor, VLLM_ENABLED, type BackendId } from '@/lib/backend';
 
 /**
- * Probe a specific backend's /health, with a hard 20s timeout so a slow/cold
- * upstream (the Modal API can take ~20s on a cold start) can't leave the query
- * pending forever.
+ * Probe a specific backend's /health, with a hard timeout so a slow/cold
+ * upstream can't leave the query pending forever.
+ *
+ * The timeout MUST stay comfortably above the Modal cold start. It used to be
+ * 20s, which was right at the edge: a measured cold start took 22.0s, so the
+ * probe aborted a backend that was about to answer 200 and the header badge
+ * reported "offline" — the #1 cause of "the site is down" reports when the
+ * whole stack was actually healthy. 60s leaves real headroom; a genuinely dead
+ * backend fails fast (connection refused) and never waits this long anyway.
  */
+const HEALTH_TIMEOUT_MS = 60_000;
 /** Health payload plus the measured round-trip latency of the probe itself —
  * a live "connection speed" signal shown in the header badge. */
 export type HealthWithLatency = HealthCheckResponse & { latencyMs: number };
 
 async function fetchHealth(backend: BackendId, signal?: AbortSignal): Promise<HealthWithLatency> {
   const ctrl = new AbortController();
-  const timer = window.setTimeout(() => ctrl.abort(), 20_000);
+  const timer = window.setTimeout(() => ctrl.abort(), HEALTH_TIMEOUT_MS);
   const onAbort = () => ctrl.abort();
   signal?.addEventListener('abort', onAbort);
   const t0 = performance.now();
