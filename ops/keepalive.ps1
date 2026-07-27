@@ -21,9 +21,12 @@ param(
     # Host port the SPA/nginx container is published on (matches PORT in .env)
     # and the port exposed by the Tailscale Funnel.
     [int]$FunnelPort = 8181,
-    # Send a tiny real image through the Modal OCR endpoint each run to keep that
+    # Send a tiny real image through the Modal OCR endpoint to keep that
     # container warm (see section 6). Pass -WarmOcr:$false to disable.
-    [bool]$WarmOcr = $true
+    [bool]$WarmOcr = $true,
+    # Minimum seconds between warm-ups. The watchdog runs more often than this
+    # (fast failure detection) but must not hammer the upstream Modal account.
+    [int]$WarmMinGapSec = 240
 )
 
 $ErrorActionPreference = "Continue"
@@ -165,22 +168,78 @@ $checks = [ordered]@{
     "vllm" = "http://127.0.0.1:$FunnelPort/api-vllm/health"
     "lens" = "http://127.0.0.1:$FunnelPort/api-lens/health"
 }
+function Invoke-Probe($url, $timeoutSec) {
+    try {
+        $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec $timeoutSec $url
+        return @{ ok = ($r.StatusCode -ge 200 -and $r.StatusCode -lt 400); detail = "HTTP $($r.StatusCode)" }
+    } catch {
+        if ($_.Exception.Response) {
+            return @{ ok = $false; detail = "HTTP " + [int]$_.Exception.Response.StatusCode }
+        }
+        return @{ ok = $false; detail = "UNREACHABLE - " + $_.Exception.Message }
+    }
+}
+
+# Force a backend back to a good state. `compose up -d` alone is NOT enough here:
+# a container can be "Up (healthy)" while its Docker network binding has gone
+# stale, so it answers 502 through nginx and compose sees nothing wrong.
+# --force-recreate rebuilds the container and its network attachment.
+function Repair-Backend($name) {
+    switch ($name) {
+        "SPA"  {
+            docker restart khmer-parser-ui 1>$null 2>$null
+            return "restarted khmer-parser-ui"
+        }
+        "tidy" {
+            docker compose -f docker-compose.tidy-adapter.yml up -d --force-recreate 1>$null 2>$null
+            return "force-recreated tidy-adapter"
+        }
+        "lens" {
+            docker compose -f docker-compose.lens-adapter.yml up -d --force-recreate 1>$null 2>$null
+            return "force-recreated lens-adapter"
+        }
+        "vllm" {
+            # The GPU engine is the usual culprit; the adapter is just its proxy.
+            docker start surya-vllm 1>$null 2>$null
+            docker compose -f docker-compose.vllm-adapter.yml up -d --force-recreate 1>$null 2>$null
+            return "started surya-vllm + force-recreated vllm-adapter"
+        }
+        default { return $null }
+    }
+}
+
 foreach ($name in $checks.Keys) {
     # Default (Modal cloud) scales to zero when idle and takes ~20s to wake.
-    # Give it a long timeout so this probe COMPLETES each run -- that keeps it
-    # warm, so real visitors hit far fewer 20-second cold starts. The local
+    # Give it a long timeout so this probe COMPLETES each run. The local
     # adapters answer in milliseconds, so a short timeout is fine for them.
-    $to = if ($name -eq "api") { 45 } else { 15 }
-    try {
-        $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec $to $checks[$name]
-        Log ("check {0}: HTTP {1}" -f $name, $r.StatusCode)
-    } catch {
-        $code = $null
-        if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
-        if ($code) {
-            Log ("check {0}: HTTP {1}" -f $name, $code)
+    $to  = if ($name -eq "api") { 45 } else { 15 }
+    $res = Invoke-Probe $checks[$name] $to
+    if ($res.ok) { Log ("check {0}: {1}" -f $name, $res.detail); continue }
+
+    # Anti-flap: one quick retry before doing anything disruptive, so a single
+    # blip under load never triggers a needless container recreate.
+    Start-Sleep -Seconds 3
+    $res = Invoke-Probe $checks[$name] $to
+    if ($res.ok) { Log ("check {0}: {1} (recovered on retry)" -f $name, $res.detail); continue }
+
+    # Modal is someone else's cloud deployment -- there is nothing local to fix.
+    if ($name -eq "api") {
+        Log ("check api: {0} - upstream Modal is cloud-side, no local repair" -f $res.detail)
+        continue
+    }
+
+    Log ("check {0}: {1} -> REPAIRING" -f $name, $res.detail)
+    $what = Repair-Backend $name
+    if ($what) {
+        Log ("repair {0}: {1}" -f $name, $what)
+        Start-Sleep -Seconds 10
+        $after = Invoke-Probe $checks[$name] $to
+        if ($after.ok) {
+            Log ("check {0}: {1} (RECOVERED after repair)" -f $name, $after.detail)
         } else {
-            Log ("check {0}: UNREACHABLE - {1}" -f $name, $_.Exception.Message)
+            # vLLM legitimately needs ~2 min to load its model after a restart,
+            # so "still failing" right here often clears by the next run.
+            Log ("check {0}: STILL FAILING after repair - {1}" -f $name, $after.detail)
         }
     }
 }
@@ -213,12 +272,27 @@ if ($WarmOcr) {
             Log ("could not create warm-up image: {0}" -f $_.Exception.Message)
         }
     }
-    if (Test-Path $warmPng) {
+    # The watchdog itself runs often (every ~2 min) so a broken backend is caught
+    # quickly, but warming hits the upstream Modal account for real -- so rate
+    # limit the warm-up to at most once per WarmMinGapSec regardless of cadence.
+    $stamp  = Join-Path $PSScriptRoot ".lastwarm"
+    $warmDue = $true
+    if (Test-Path $stamp) {
+        try {
+            $last = [datetime]((Get-Content $stamp -Raw).Trim())
+            if (((Get-Date) - $last).TotalSeconds -lt $WarmMinGapSec) { $warmDue = $false }
+        } catch { $warmDue = $true }
+    }
+
+    if (-not $warmDue) {
+        Log "warm ocr: skipped (warmed recently)"
+    } elseif (Test-Path $warmPng) {
         $t0   = Get-Date
         $url  = "http://127.0.0.1:{0}/api/ocr-image" -f $FunnelPort
         $code = & curl.exe -s -o NUL -w "%{http_code}" -m 90 -F ("file=@{0}" -f $warmPng) $url 2>$null
         $ms   = [int]((Get-Date) - $t0).TotalMilliseconds
         Log ("warm ocr: HTTP {0} in {1}ms" -f $code, $ms)
+        (Get-Date).ToString("o") | Set-Content -Path $stamp -Encoding ascii
     }
 }
 

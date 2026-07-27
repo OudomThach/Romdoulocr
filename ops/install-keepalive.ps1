@@ -45,9 +45,12 @@ Write-Host "[ok] Sleep and hibernate disabled on AC power (the #1 cause of the s
 $arg = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $watchdog
 $action  = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
 $atLogon = New-ScheduledTaskTrigger -AtLogOn
-$every5  = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
-Register-ScheduledTask -TaskName "RomdoulKeepAlive" -Action $action -Trigger $atLogon, $every5 -RunLevel Highest -Force -Description "Keep Romdoul OCR docker + tailscale funnel up" | Out-Null
-Write-Host "[ok] Scheduled task 'RomdoulKeepAlive' registered (runs at logon and every 5 minutes)."
+# Every 2 minutes: a broken backend is detected and repaired fast. The Modal
+# warm-up inside the watchdog is separately rate-limited, so a tight cadence
+# does not mean more load on the upstream API.
+$everyN  = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)
+Register-ScheduledTask -TaskName "RomdoulKeepAlive" -Action $action -Trigger $atLogon, $everyN -RunLevel Highest -Force -Description "Keep Romdoul OCR docker + tailscale funnel up" | Out-Null
+Write-Host "[ok] Scheduled task 'RomdoulKeepAlive' registered (runs at logon and every 2 minutes)."
 
 # 4. Run the watchdog once now. ------------------------------------------------
 Write-Host "[..] Running the watchdog once to bring everything up now."
