@@ -20,7 +20,10 @@ param(
     [string]$ProjectDir = "C:\Users\USER\work\ocrapi_backup",
     # Host port the SPA/nginx container is published on (matches PORT in .env)
     # and the port exposed by the Tailscale Funnel.
-    [int]$FunnelPort = 8181
+    [int]$FunnelPort = 8181,
+    # Send a tiny real image through the Modal OCR endpoint each run to keep that
+    # container warm (see section 6). Pass -WarmOcr:$false to disable.
+    [bool]$WarmOcr = $true
 )
 
 $ErrorActionPreference = "Continue"
@@ -179,6 +182,43 @@ foreach ($name in $checks.Keys) {
         } else {
             Log ("check {0}: UNREACHABLE - {1}" -f $name, $_.Exception.Message)
         }
+    }
+}
+
+# 6. Keep the Modal OCR container warm. ---------------------------------------
+# /health and /ocr-image are SEPARATE Modal functions with SEPARATE containers.
+# Measured: /health answers in ~0.9s (kept warm by the probe above) while
+# /api/ocr-image still took ~22s from cold. So probing /health does NOT prevent
+# the ~22-second stall a user hits on their first real scan -- and a 22s hang is
+# what reads as "the site is broken" (and can surface as HTTP 0 / Network error
+# if a phone or flaky Wi-Fi drops the connection while waiting).
+# Sending a tiny real image through the OCR path keeps that container warm too.
+# NOTE: this is a real request to the upstream Modal API each run (~288/day).
+# Pass -WarmOcr:$false to turn it off.
+if ($WarmOcr) {
+    $warmPng = Join-Path $PSScriptRoot "warm.png"
+    if (-not (Test-Path $warmPng)) {
+        try {
+            Add-Type -AssemblyName System.Drawing
+            $bmp  = New-Object System.Drawing.Bitmap 240, 80
+            $g    = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::White)
+            $font = New-Object System.Drawing.Font "Arial", 24
+            $g.DrawString("warm", $font, [System.Drawing.Brushes]::Black, 12, 20)
+            $g.Dispose()
+            $bmp.Save($warmPng, [System.Drawing.Imaging.ImageFormat]::Png)
+            $bmp.Dispose()
+            Log "created warm-up image: $warmPng"
+        } catch {
+            Log ("could not create warm-up image: {0}" -f $_.Exception.Message)
+        }
+    }
+    if (Test-Path $warmPng) {
+        $t0   = Get-Date
+        $url  = "http://127.0.0.1:{0}/api/ocr-image" -f $FunnelPort
+        $code = & curl.exe -s -o NUL -w "%{http_code}" -m 90 -F ("file=@{0}" -f $warmPng) $url 2>$null
+        $ms   = [int]((Get-Date) - $t0).TotalMilliseconds
+        Log ("warm ocr: HTTP {0} in {1}ms" -f $code, $ms)
     }
 }
 
