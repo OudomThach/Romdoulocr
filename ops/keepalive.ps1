@@ -163,8 +163,13 @@ $checks = [ordered]@{
     "lens" = "http://127.0.0.1:$FunnelPort/api-lens/health"
 }
 foreach ($name in $checks.Keys) {
+    # Default (Modal cloud) scales to zero when idle and takes ~20s to wake.
+    # Give it a long timeout so this probe COMPLETES each run -- that keeps it
+    # warm, so real visitors hit far fewer 20-second cold starts. The local
+    # adapters answer in milliseconds, so a short timeout is fine for them.
+    $to = if ($name -eq "api") { 45 } else { 15 }
     try {
-        $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 $checks[$name]
+        $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec $to $checks[$name]
         Log ("check {0}: HTTP {1}" -f $name, $r.StatusCode)
     } catch {
         $code = $null
