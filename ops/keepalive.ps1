@@ -121,20 +121,50 @@ if (Test-Path $ts) {
     Log "tailscale.exe not found - funnel not checked"
 }
 
-# 5. Per-backend liveness check, through nginx exactly as the browser hits it,
-#    so a down backend shows up in the log. "api" is the normal/Default cloud OCR
-#    (nginx -> Modal): the watchdog can't restart Modal itself (it's not our
-#    deployment), but this confirms the proxy path to it is working.
+# 5. SELF-HEAL the host-port forward, then log per-backend health. ------------
+# THE root cause of the outage this was built for: a container can be "healthy"
+# internally while Docker Desktop's WSL2 host-port forward for the SPA port has
+# gone stale (after sleep/idle). nginx is then unreachable from the host AND the
+# Tailscale funnel, so the whole site looks dead even though every container is
+# Up. `docker compose up -d` does NOT fix this -- nothing looks wrong to compose.
+# The cure is to restart the SPA container, which re-establishes the forward.
+# We probe "/" (served by nginx directly, no cloud dependency): a CONNECTION
+# error there means the forward is stale, so restart once and re-check.
+function Test-Spa {
+    try {
+        $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 12 ("http://127.0.0.1:{0}/" -f $FunnelPort)
+        return $true
+    } catch {
+        # A real HTTP status (4xx/5xx) still proves the port forward works.
+        if ($_.Exception.Response) { return $true }
+        return $false
+    }
+}
+
+if (-not (Test-Spa)) {
+    Log "SPA unreachable on host port $FunnelPort (stale WSL2 port-forward?) - restarting khmer-parser-ui"
+    docker restart khmer-parser-ui 1>$null 2>$null
+    Start-Sleep -Seconds 6
+    if (Test-Spa) {
+        Log "SPA recovered after restarting khmer-parser-ui"
+    } else {
+        Log "SPA STILL unreachable after restart - Docker Desktop itself may need a restart"
+    }
+}
+
+# Informational: per-backend liveness through nginx, exactly as the browser hits
+# it. "api" is the Modal cloud (can be slow on a cold start; a timeout here is
+# usually just Modal waking, not an outage).
 $checks = [ordered]@{
-    "SPA"  = "http://localhost:$FunnelPort/"
-    "api"  = "http://localhost:$FunnelPort/api/health"
-    "tidy" = "http://localhost:$FunnelPort/api-tidy/health"
-    "vllm" = "http://localhost:$FunnelPort/api-vllm/health"
-    "lens" = "http://localhost:$FunnelPort/api-lens/health"
+    "SPA"  = "http://127.0.0.1:$FunnelPort/"
+    "api"  = "http://127.0.0.1:$FunnelPort/api/health"
+    "tidy" = "http://127.0.0.1:$FunnelPort/api-tidy/health"
+    "vllm" = "http://127.0.0.1:$FunnelPort/api-vllm/health"
+    "lens" = "http://127.0.0.1:$FunnelPort/api-lens/health"
 }
 foreach ($name in $checks.Keys) {
     try {
-        $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 $checks[$name]
+        $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 $checks[$name]
         Log ("check {0}: HTTP {1}" -f $name, $r.StatusCode)
     } catch {
         $code = $null
