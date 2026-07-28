@@ -1,13 +1,31 @@
 # Netlify config for the hosted (public, guest-facing) build.
 #
-# Both backends are reached DIRECTLY at the home machine via the Tailscale
-# Funnel (browser → funnel → home nginx → Modal / vLLM adapter). This bypasses
-# Netlify's 26s proxy timeout, which real OCR (30-60s) exceeds. nginx allows
-# 300s and adds the adapter token server-side, so no secret ships in the bundle.
+# --- Why the API calls are SAME-ORIGIN ---------------------------------------
+# The SPA calls relative paths (/api, /api-vllm, /api-lens, /api-tidy) and
+# Netlify proxies them to the home machine over the Tailscale Funnel.
 #
-# The funnel hostname is public (not a secret), so it lives here. Requires the
-# funnel to expose the nginx container: `tailscale funnel --bg 8181`. When the
-# PC is off the site can't reach either backend (accepted trade-off).
+# It used to call the funnel hostname DIRECTLY (absolute https://...ts.net/...
+# URLs baked in via VITE_*_URL). That broke on any device signed into the
+# tailnet: MagicDNS resolves the funnel hostname to a PRIVATE 100.x.x.x address,
+# so Chrome treats a public site reaching a private IP as "Local Network Access"
+# and blocks every backend call behind a permission prompt
+# ("romdoulocr.netlify.app is asking you to access other devices on your local
+# network"). Until the user clicks Allow, all backends read "offline" -- which is
+# indistinguishable from a real outage. Proxying through Netlify means the
+# browser only ever talks to the public netlify.app origin, so that prompt can
+# never appear, on any device, with no per-device setup.
+#
+# TRADE-OFF: Netlify caps a proxied request at ~26s. That was fatal when OCR took
+# 30-60s, but is workable now: /health is cached at nginx (~10ms), the watchdog
+# keeps the Modal OCR container warm (~2s), and the app already sends ONE PAGE
+# PER REQUEST. A cold Modal (~22s) is the tight case to watch.
+#
+# TO REVERT to direct-funnel calls (e.g. if 26s bites): re-add the VITE_*_URL
+# vars below to [build.environment] and delete the four proxy redirects. The
+# funnel itself stays configured either way, so this is a one-line rollback.
+#
+# Requires the funnel to expose the nginx container: `tailscale funnel --bg 8181`.
+# When the PC is off the site can't reach any backend (accepted trade-off).
 
 [build]
   command = "npm run build"
@@ -15,13 +33,40 @@
 
 [build.environment]
   NODE_VERSION = "22"
-  VITE_API_URL = "https://apt-server-desktop.tail806605.ts.net/api"
-  VITE_VLLM_URL = "https://apt-server-desktop.tail806605.ts.net/api-vllm"
-  VITE_LENS_URL = "https://apt-server-desktop.tail806605.ts.net/api-lens"
-  VITE_TIDY_URL = "https://apt-server-desktop.tail806605.ts.net/api-tidy"
+  # No VITE_*_URL here on purpose -- unset makes the SPA fall back to the
+  # relative paths (/api, /api-vllm, /api-lens, /api-tidy) proxied below.
+  # See src/lib/backend.ts and src/lib/tidy.ts for those defaults.
 
-# SPA fallback — serve index.html for any unknown path. (No /api proxy here
-# anymore; the SPA calls the funnel directly at the absolute URLs above.)
+# --- API proxies (MUST come before the SPA fallback) -------------------------
+# status = 200 makes these rewrites (proxy) rather than redirects, so the
+# browser never learns the upstream URL. force = true so they win over the
+# catch-all below.
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api-vllm/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-vllm/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api-lens/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-lens/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api-tidy/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-tidy/:splat"
+  status = 200
+  force = true
+
+# SPA fallback -- serve index.html for any unknown path. Keep this LAST.
 [[redirects]]
   from = "/*"
   to = "/index.html"
