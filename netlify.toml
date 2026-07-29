@@ -66,6 +66,14 @@
   status = 200
   force = true
 
+# Versioned public entry point for third-party integrators (/v1/api/...).
+# nginx rewrites /v1/... internally, so both paths hit the same handlers.
+[[redirects]]
+  from = "/v1/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/v1/:splat"
+  status = 200
+  force = true
+
 # SPA fallback -- serve index.html for any unknown path. Keep this LAST.
 [[redirects]]
   from = "/*"
