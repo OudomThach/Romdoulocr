@@ -25,11 +25,17 @@ How the work actually runs
     the merge streams those files back one at a time, so OCR RESULTS never
     accumulate: an OCR page carries `crop_base64` per region, and a 300-page job
     held whole measured 350 MB RSS against 34 MB streamed.
-    The honest exception is `_split_units`: pypdf parses the source PDF in memory
-    and was measured peaking at ~2.5x the file size (301 MB for a 120 MB PDF).
-    That is once per job, and it is NOT covered by `_INFLIGHT` or the per-job
-    semaphore, so N concurrent submissions of large PDFs multiply it. If that
-    ever bites, cap it at the door (submission backpressure) rather than here.
+    `_split_units` is the other memory peak: pypdf parses the source PDF in
+    memory and was measured peaking at ~2.5x the file size (301 MB for a 120 MB
+    PDF). It is NOT covered by `_INFLIGHT` or the per-job semaphore — 120
+    simultaneous 20 MB submissions used to parse all 120 at once — so it has its
+    own `_SPLITS` gate (JOBS_MAX_SPLITS). The gate is held in the BACKGROUND
+    task, never in the request: POST /jobs still answers 202 in milliseconds and
+    the split queues behind it.
+  * Submission itself is bounded by JOBS_MAX_ACTIVE queued+running jobs; past
+    that POST /jobs answers 429 + Retry-After. An Idempotency-Key replay of a
+    job that already exists is answered BEFORE that check, so a client polling
+    by resubmitting can never be locked out by its own backlog.
   * Results are merged back IN PAGE ORDER with page_number renumbered 1..N,
     mirroring how vllm-adapter merges multi-file documents.
   * The engines are called DIRECTLY by container name / Modal URL — NOT through
@@ -48,11 +54,36 @@ so page_number stays aligned with the source document — a caller can diff
 `failures` against the pages and re-run only what's missing.
 
 State lives in SQLite (JOBS_DB) and results as JSON files (JOBS_DIR), so a
-container restart doesn't lose the history. Jobs that were in flight when the
-process died are marked failed at startup rather than hanging forever, and
-anything older than JOBS_TTL_HOURS is reaped. A job that ends `failed` or
-`cancelled` RELEASES its Idempotency-Key, so the stable key a nightly pipeline
-sends can re-run the batch instead of replaying the corpse forever.
+container restart doesn't lose the history, and anything older than
+JOBS_TTL_HOURS is reaped. A job that ends `failed` or `cancelled` RELEASES its
+Idempotency-Key, so the stable key a nightly pipeline sends can re-run the batch
+instead of replaying the corpse forever.
+
+Crash recovery
+--------------
+A job that was queued/running when the process died is RESUMED at startup, not
+failed. It used to be failed, which threw away every page that had already
+finished: one `docker restart` (or one OOM kill) partway through a 6000-page
+batch cost hours of GPU time and forced the caller to resubmit from scratch.
+
+Resume re-splits the upload (deterministic — same sources, same order, same unit
+indices) and then SKIPS every page that already has a readable
+`<job>/parts/NNNNNN.json`. Those pages are never re-sent to an engine; the
+progress counters are rebuilt from the part files actually on disk rather than
+from the pre-crash `done`, so a poll reflects reality. A part that will not
+parse counts as NOT done and is redone — `_write_part` renames a temp file into
+place, but a hard kill can still leave the rename durable ahead of the data on
+some overlay/volume filesystems, and half a JSON object is exactly what that
+looks like.
+
+The bound is JOBS_MAX_RESUMES (default 3): a job that has already been resumed
+that many times is failed for real. Without it, a job whose content kills the
+process turns `restart: unless-stopped` into an infinite restart loop that never
+makes progress and never lets the queue drain.
+
+Resume needs the ORIGINAL upload, so nothing may delete `<job>/input/` while the
+job is unfinished — the TTL reaper is restricted to terminal jobs for exactly
+this reason (see _reap_once).
 
 Env:
   ADAPTER_TOKEN      optional shared secret; when set, X-Adapter-Token required
@@ -63,7 +94,8 @@ Env:
   JOBS_DB            default /data/jobs.db      JOBS_DIR   default /data/results
   JOBS_TTL_HOURS     default 72                 JOBS_MAX_INFLIGHT   default 8
   JOBS_MAX_ATTEMPTS  default 3                  JOBS_PAGE_TIMEOUT   default 600
-  JOBS_MAX_UPLOAD_MB default 200
+  JOBS_MAX_UPLOAD_MB default 200                JOBS_MAX_SPLITS     default 2
+  JOBS_MAX_ACTIVE    default 50                 JOBS_MAX_RESUMES    default 3
 """
 
 from __future__ import annotations
@@ -146,6 +178,30 @@ DEFAULT_CONCURRENCY = 3
 # requests to one engine. Raise it only if the engine is genuinely horizontal.
 MAX_INFLIGHT = max(1, int(os.environ.get("JOBS_MAX_INFLIGHT", "8")))
 
+# Concurrent _split_units calls, process-wide. pypdf holds the whole source PDF
+# in memory (~2.5x the file size), and the split is the one phase no other
+# semaphore covers: every accepted job starts one immediately, so 120 queued
+# 20 MB PDFs used to be 120 simultaneous parses (~6 GB) with nothing in the way.
+# Deliberately small and separate from MAX_INFLIGHT — a split blocking an engine
+# slot would idle the GPU for no reason.
+MAX_SPLITS = max(1, int(os.environ.get("JOBS_MAX_SPLITS", "2")))
+
+# Ceiling on queued+running jobs before POST /jobs sheds load with a 429. The
+# queue was previously unbounded, so a client in a resubmit loop could pile up
+# disk, SQLite rows and background tasks without limit; the engines are the
+# bottleneck anyway, so a 429 at the door is more honest than a queue depth of
+# 4000 that reports "queued" for a day.
+MAX_ACTIVE = max(1, int(os.environ.get("JOBS_MAX_ACTIVE", "50")))
+# Advertised in Retry-After. Not tuned to anything — a batch job takes minutes,
+# so any small number is a polite "come back shortly", not a promise.
+BACKPRESSURE_RETRY_AFTER = max(1, int(os.environ.get("JOBS_BACKPRESSURE_RETRY_AFTER", "30")))
+
+# How many times one job may be resumed across process restarts before it is
+# failed for real. This is the poison-pill bound: a job whose content OOMs or
+# crashes the process would otherwise resume forever under
+# `restart: unless-stopped`, burning the same GPU time on every loop.
+MAX_RESUMES = max(0, int(os.environ.get("JOBS_MAX_RESUMES", "3")))
+
 MAX_ATTEMPTS = max(1, int(os.environ.get("JOBS_MAX_ATTEMPTS", "3")))
 BACKOFF_BASE_S = float(os.environ.get("JOBS_BACKOFF_BASE", "2"))
 BACKOFF_MAX_S = float(os.environ.get("JOBS_BACKOFF_MAX", "60"))
@@ -161,11 +217,15 @@ MAX_UPLOAD_BYTES = int(float(os.environ.get("JOBS_MAX_UPLOAD_MB", "200")) * 1024
 UPLOAD_CHUNK = 1 << 20
 
 TERMINAL = frozenset({"succeeded", "partial", "failed", "cancelled"})
+# The same set as a SQL literal, built once so the reaper's IN (...) can never
+# drift out of step with TERMINAL above.
+_TERMINAL_SQL = "(" + ", ".join(f"'{s}'" for s in sorted(TERMINAL)) + ")"
 
 # Live background jobs, so DELETE can actually stop the work instead of only
 # hiding it. Populated on submit, popped when the task settles.
 _TASKS: dict[str, asyncio.Task[None]] = {}
 _INFLIGHT = asyncio.Semaphore(MAX_INFLIGHT)
+_SPLITS = asyncio.Semaphore(MAX_SPLITS)
 
 
 # --------------------------------------------------------------------------- #
@@ -188,7 +248,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at  REAL NOT NULL,
     started_at  REAL,
     finished_at REAL,
-    error       TEXT
+    error       TEXT,
+    -- How many times this job has been picked back up after a process death.
+    -- Lives in the row, not in memory, because the whole point is that it
+    -- survives the restart it is counting.
+    resumes     INTEGER NOT NULL DEFAULT 0
 );
 -- Unique on the idempotency key: this index IS the idempotency guarantee — two
 -- concurrent retries carrying the same key can't both insert. Partial (WHERE
@@ -222,6 +286,21 @@ def _db_init() -> None:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(SCHEMA)
+    # CREATE TABLE IF NOT EXISTS is a no-op against the live /data volume, which
+    # already holds a jobs table without `resumes`. Without this the first resume
+    # sweep dies on "no such column" and every in-flight job hangs at `running`
+    # forever — the failure mode the whole feature exists to remove.
+    try:
+        conn.execute("ALTER TABLE jobs ADD COLUMN resumes INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # already there
+    try:
+        # `done` as of the last restart. _recover_interrupted compares against it
+        # to tell a job that is stuck from one that is merely long-running, so
+        # ordinary restarts stop counting against the resume bound.
+        conn.execute("ALTER TABLE jobs ADD COLUMN resume_mark INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # already there
     conn.commit()
     _DB = conn
 
@@ -298,19 +377,150 @@ def _replayable(key: str) -> sqlite3.Row | None:
     return row
 
 
-def _recover_interrupted() -> int:
-    """Jobs that were queued/running when the process died have no worker any
-    more — their asyncio task went with the process. Left alone they'd poll as
-    "running" forever, so fail them loudly with an actionable message.
+def _recover_interrupted() -> tuple[list[sqlite3.Row], int]:
+    """Pick up jobs whose worker died with the process. Returns (to_resume, gave_up).
 
-    "Resubmit it" is only honest because a failed job releases its
-    Idempotency-Key (see _replayable) — otherwise the resubmit the caller is
-    told to send would just replay this same dead row."""
-    return _exec(
-        "UPDATE jobs SET status='failed', finished_at=?, error=? "
-        "WHERE status IN ('queued','running')",
-        (time.time(), "The job service restarted while this job was in flight. Resubmit it."),
+    This used to fail every queued/running row outright, which discarded every
+    page that had already been OCR'd — the expensive part. The rows are re-queued
+    instead; _run_job then skips the pages whose part files are already on disk.
+
+    The resume counter is bumped HERE, before any work restarts, so a job that
+    kills the process is charged for the attempt even if it dies again
+    immediately. Charging it on success instead is what would let a poison pill
+    loop forever: it never reaches success.
+
+    But it is charged ONLY to jobs that made no progress since their last
+    resume. Bumping every in-flight row on every start conflated "this input
+    kills the service" with "the service restarted for unrelated reasons" — and
+    on this host the latter is routine, because ops/keepalive.ps1 force-recreates
+    the container whenever it judges the backend unhealthy. A healthy multi-hour
+    batch was therefore failed by four ordinary restarts, blaming its own input,
+    stranding every page it had already finished. A job that is genuinely
+    poisonous never advances `done`, so it still hits the bound and still stops.
+    """
+    now = time.time()
+    _exec(
+        "UPDATE jobs SET resumes = resumes + 1 WHERE status IN ('queued','running') "
+        "AND done <= resume_mark"
     )
+    # Snapshot progress so the NEXT restart can tell whether this attempt got
+    # anywhere. Reset the counter for jobs that did advance: they are making
+    # progress across restarts, which is the behaviour we want to encourage.
+    _exec(
+        "UPDATE jobs SET resumes = 0 WHERE status IN ('queued','running') AND done > resume_mark"
+    )
+    _exec("UPDATE jobs SET resume_mark = done WHERE status IN ('queued','running')")
+    gave_up = _exec(
+        "UPDATE jobs SET status='failed', finished_at=?, error=? "
+        "WHERE status IN ('queued','running') AND resumes > ?",
+        (
+            now,
+            f"The job service restarted {MAX_RESUMES + 1} times while this job was in flight "
+            f"(JOBS_MAX_RESUMES={MAX_RESUMES}). It is not being retried again — the input may be "
+            "what is killing the service. Resubmit it, or split it into smaller batches.",
+            MAX_RESUMES,
+        ),
+    )
+    # Back to 'queued' so _run_job's `AND status='queued'` claim works unchanged,
+    # and so a DELETE landing before the worker's first tick still wins the race.
+    rows = _query_all("SELECT * FROM jobs WHERE status IN ('queued','running')")
+    _exec("UPDATE jobs SET status='queued', finished_at=NULL, error=NULL WHERE status IN ('queued','running')")
+    return list(rows), gave_up
+
+
+def _adopt_finished_result(job_id: str) -> tuple[str, str | None] | None:
+    """Return the terminal (status, error) for a job whose result is already on
+    disk, or None if there is nothing to adopt.
+
+    Only a COMPLETE result counts. A merge killed halfway leaves a truncated
+    file, and adopting that would ship a silently short document — worse than
+    redoing the work — so the file must parse and its page/entry count must match
+    what the row says. `total` is 0 only before the split finishes, and a job that
+    never got that far has no result to adopt either way.
+    """
+    path = _result_path(job_id)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return None  # truncated by the same kill — redo it properly
+
+    row = _query_one("SELECT total, failed FROM jobs WHERE job_id=?", (job_id,))
+    expected = int(row["total"]) if row and row["total"] else 0
+    if not expected:
+        return None
+
+    if isinstance(doc, list):
+        count = len(doc)
+        failures = sum(1 for e in doc if isinstance(e, dict) and e.get("error"))
+    elif isinstance(doc, dict):
+        pages = doc.get("pages") or []
+        count = len(pages)
+        failures = len(doc.get("failures") or [])
+    else:
+        return None
+    if count != expected:
+        return None
+
+    log.info("job %s: adopting the result already on disk (%d entries)", job_id, count)
+    if failures >= expected:
+        return "failed", f"All {expected} pages failed; see `failures` in the result."
+    if failures:
+        return "partial", f"{failures} of {expected} pages failed; see `failures` in the result."
+    return "succeeded", None
+
+
+def _restore_sources(job_id: str, filenames: list[str]) -> list[dict[str, str]]:
+    """Rebuild the `sources` list a resumed job needs from `<job>/input/`.
+
+    create_job writes each upload as `NNNN_<safe name>`, so a lexical sort
+    restores submission order — which matters more than it looks: the unit index
+    a part file is keyed by is just a running counter over the sources in that
+    order, so getting it wrong would silently pair page 4's OCR with page 40.
+    The display name comes from the recorded `filenames` (the on-disk name is
+    sanitised and prefixed), falling back to the file itself if the row and the
+    directory ever disagree.
+    """
+    in_dir = os.path.join(_job_dir(job_id), "input")
+    try:
+        entries = sorted(e for e in os.listdir(in_dir) if os.path.isfile(os.path.join(in_dir, e)))
+    except OSError:
+        return []
+    sources: list[dict[str, str]] = []
+    for i, entry in enumerate(entries):
+        name = filenames[i] if i < len(filenames) else entry.split("_", 1)[-1]
+        sources.append({"path": os.path.join(in_dir, entry), "name": name})
+    return sources
+
+
+def _completed_parts(job_id: str, total: int) -> set[int]:
+    """Indices whose spilled payload is present AND parses.
+
+    Parsing rather than stat()ing is the point: a page that was mid-spill when
+    the process was killed must count as NOT done, or the merge emits a failure
+    placeholder for a page nobody will ever retry. _write_part renames a temp
+    file into place so a torn part should be impossible, but "should be" is not
+    a guarantee across a Docker volume after SIGKILL, and re-OCRing one page is
+    far cheaper than shipping a hole in the document.
+
+    Reads one part at a time and drops it: the parts are the same crop_base64
+    blobs the spill exists to keep out of RAM, and a 6000-page job would
+    otherwise be several GB before the first page is even re-sent.
+    """
+    done: set[int] = set()
+    for index in range(total):
+        if _read_part(job_id, index) is not None:
+            done.add(index)
+    return done
+
+
+def _active_count() -> int:
+    """Queued + running jobs — the number MAX_ACTIVE caps. Indexed by
+    jobs_status, so this stays a cheap probe even with 72h of rows behind it."""
+    row = _query_one("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running')")
+    return int(row["n"]) if row else 0
 
 
 def _status_counts() -> dict[str, int]:
@@ -332,12 +542,19 @@ def _iso(ts: float | None) -> str | None:
     return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _error(code: str, message: str, status: int, **extra: Any) -> JSONResponse:
+def _error(
+    code: str, message: str, status: int, headers: dict[str, str] | None = None, **extra: Any
+) -> JSONResponse:
     """The API-wide error envelope (same shape nginx emits for 429/413/502/504),
-    so a pipeline can branch on a stable `code` instead of matching prose."""
+    so a pipeline can branch on a stable `code` instead of matching prose.
+
+    `headers` exists for Retry-After: a 429 that only carries the delay in the
+    JSON body forces every generic HTTP client (and every retrying proxy in
+    front of us) to parse it, when the header is the thing they already honour.
+    """
     err: dict[str, Any] = {"code": code, "message": message}
     err.update(extra)
-    return JSONResponse({"error": err, "detail": message}, status_code=status)
+    return JSONResponse({"error": err, "detail": message}, status_code=status, headers=headers)
 
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -926,17 +1143,50 @@ async def _run_job(
             # resurrecting a cancelled row as "running".
             return
 
-        units = await asyncio.to_thread(_split_units, job_id, sources)
+        # A job whose result.json already exists finished its work; only the
+        # terminal status write was lost. _run_job ends
+        # merge -> rmtree(parts) -> _finish, so a kill inside that window leaves
+        # a COMPLETE result next to a row still reading 'running'. Resuming from
+        # `parts/` there is doubly wrong: the parts were just deleted, so every
+        # page gets re-OCR'd, AND the re-merge overwrites the good result — with
+        # failure placeholders if the engine happens to be cold on restart, which
+        # is exactly what a host reboot looks like. The OCR output would be
+        # unrecoverable. Adopt the finished result instead of redoing the job.
+        adopted = await asyncio.to_thread(_adopt_finished_result, job_id)
+        if adopted is not None:
+            status, error = adopted
+            await _finish(job_id, status, error=error)
+            return
+
+        # The ONLY gate on pypdf's ~2.5x-file-size peak. Held here, in the
+        # background task, so submission stays instant: an over-cap job waits in
+        # this queue, not in the caller's POST.
+        async with _SPLITS:
+            units = await asyncio.to_thread(_split_units, job_id, sources)
         if not units:
             await _finish(job_id, "failed", error="The upload contained no readable pages.")
             return
         await asyncio.to_thread(_exec, "UPDATE jobs SET total=? WHERE job_id=?", (len(units), job_id))
 
+        # Pages already OCR'd before a crash. On a first run this is empty (the
+        # parts directory does not exist yet); on a resume it is the whole point.
+        finished = await asyncio.to_thread(_completed_parts, job_id, len(units))
+        pending = [i for i in range(len(units)) if i not in finished]
+
         failures: list[dict[str, Any] | None] = [None] * len(units)
         sem = asyncio.Semaphore(concurrency)
-        done = 0
+        # Seeded from DISK, not from the row's pre-crash `done`. The old counter
+        # counted pages this process never saw finish and did not count a page
+        # whose spill landed after the last progress write, so a resumed job
+        # reported a number that matched neither the work left nor the result.
+        done = len(finished)
         failed = 0
         progress_lock = asyncio.Lock()
+        if finished:
+            log.info("job %s: resuming with %d/%d page(s) already done", job_id, done, len(units))
+            await asyncio.to_thread(
+                _exec, "UPDATE jobs SET done=?, failed=0 WHERE job_id=?", (done, job_id)
+            )
 
         timeout = httpx.Timeout(connect=15.0, read=PAGE_TIMEOUT_S, write=PAGE_TIMEOUT_S, pool=PAGE_TIMEOUT_S)
         limits = httpx.Limits(max_connections=concurrency + 2, max_keepalive_connections=concurrency + 2)
@@ -981,15 +1231,17 @@ async def _run_job(
                         # answered /result with 409.
                         log.warning("job %s: progress update failed at page %d", job_id, index + 1, exc_info=True)
 
+            # Only `pending`. A page with a readable part file is never handed to
+            # an engine again — not re-validated, not re-sent — because not
+            # re-spending GPU time on finished work is the entire reason resume
+            # exists.
             # return_exceptions: a page's local fault belongs in `failures`, not
             # in an abort that kills its siblings mid-request and tears the httpx
             # client down under them.
-            outcomes = await asyncio.gather(
-                *(run_one(i) for i in range(len(units))), return_exceptions=True
-            )
+            outcomes = await asyncio.gather(*(run_one(i) for i in pending), return_exceptions=True)
 
         aborted = 0
-        for index, outcome in enumerate(outcomes):
+        for index, outcome in zip(pending, outcomes):
             if isinstance(outcome, BaseException) and failures[index] is None:
                 log.error("job %s: page %d aborted", job_id, index + 1, exc_info=outcome)
                 failures[index] = {
@@ -1072,11 +1324,52 @@ async def _finish(job_id: str, status: str, error: str | None = None) -> None:
 # --------------------------------------------------------------------------- #
 async def _reap_once() -> int:
     cutoff = time.time() - JOBS_TTL_HOURS * 3600
-    rows = await asyncio.to_thread(_query_all, "SELECT job_id FROM jobs WHERE created_at < ?", (cutoff,))
+    # The delete list is snapshotted BEFORE anything below is failed, so a job
+    # this sweep stops is only removed by the NEXT sweep. Two reasons, and the
+    # first is the important one:
+    #   * `<job>/input/` is the source a resume re-splits from. Deleting it under
+    #     a job that is not terminal turns a survivable restart into a batch that
+    #     can never be picked up again — the reaper itself would be what loses
+    #     the work. Restricting the delete to TERMINAL rows is the invariant
+    #     resume depends on: an unfinished job always still has its upload.
+    #   * the cancel below is awaited with a timeout, and the merge runs in an
+    #     uncancellable worker thread. Deleting the directory in the same breath
+    #     as a cancel that may have timed out is the exact race the comments in
+    #     DELETE warn about; a full sweep interval of slack removes it.
+    rows = await asyncio.to_thread(
+        _query_all,
+        "SELECT job_id FROM jobs WHERE created_at < ? AND status IN " + _TERMINAL_SQL,
+        (cutoff,),
+    )
+
+    # A job still queued/running past the TTL is stuck, not slow. Stop it and
+    # give it a terminal status; the sweep after this one collects it.
+    stale = await asyncio.to_thread(
+        _query_all,
+        "SELECT job_id FROM jobs WHERE created_at < ? AND status IN ('queued','running')",
+        (cutoff,),
+    )
+    for row in stale:
+        job_id = str(row["job_id"])
+        task = _TASKS.pop(job_id, None)
+        if task is not None:
+            task.cancel()
+            await asyncio.wait({task}, timeout=5)
+        await asyncio.to_thread(
+            _exec,
+            "UPDATE jobs SET status='failed', finished_at=?, error=?, idem_key=NULL "
+            "WHERE job_id=? AND status IN ('queued','running')",
+            (
+                time.time(),
+                f"The job was still unfinished {JOBS_TTL_HOURS:.0f}h after submission and was stopped.",
+                job_id,
+            ),
+        )
+
     for row in rows:
         job_id = str(row["job_id"])
-        # A job still running past the TTL is stuck; stop it before deleting the
-        # files out from under it.
+        # Terminal, but a worker can still be unwinding (the merge thread is
+        # uncancellable); stop it before deleting the files out from under it.
         task = _TASKS.pop(job_id, None)
         if task is not None:
             task.cancel()
@@ -1089,6 +1382,8 @@ async def _reap_once() -> int:
             await asyncio.wait({task}, timeout=5)
         await asyncio.to_thread(_exec, "DELETE FROM jobs WHERE job_id=?", (job_id,))
         await asyncio.to_thread(_rmtree, _job_dir(job_id))
+    if stale:
+        log.warning("stopped %d job(s) still unfinished after %.0fh", len(stale), JOBS_TTL_HOURS)
     return len(rows)
 
 
@@ -1108,12 +1403,43 @@ async def _reaper_loop() -> None:
 # --------------------------------------------------------------------------- #
 # App
 # --------------------------------------------------------------------------- #
+def _resume(row: sqlite3.Row) -> bool:
+    """Re-arm one interrupted job's worker. False if it cannot be resumed.
+
+    The upload is the only thing resume cannot reconstruct — everything else
+    (engine, mode, params, concurrency) is in the row and the finished pages are
+    in `<job>/parts/`. If `<job>/input/` is gone the job is dead for good, so say
+    so instead of leaving it queued with nothing to run.
+    """
+    job_id = str(row["job_id"])
+    try:
+        filenames = json.loads(row["filenames"] or "[]")
+        params = json.loads(row["params"] or "{}")
+    except ValueError:
+        filenames, params = [], {}
+    sources = _restore_sources(job_id, list(filenames))
+    if not sources:
+        _exec(
+            "UPDATE jobs SET status='failed', finished_at=?, error=?, idem_key=NULL "
+            "WHERE job_id=? AND status='queued'",
+            (time.time(), "The uploaded source files are gone, so this job cannot be resumed. Resubmit it.", job_id),
+        )
+        return False
+    _TASKS[job_id] = asyncio.create_task(
+        _run_job(job_id, str(row["engine"]), str(row["mode"]), int(row["concurrency"]), params, sources)
+    )
+    return True
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _db_init()
-    recovered = _recover_interrupted()
-    if recovered:
-        log.warning("marked %d interrupted job(s) as failed after restart", recovered)
+    interrupted, gave_up = _recover_interrupted()
+    if gave_up:
+        log.error("gave up on %d job(s) after %d resume(s); see the job `error`", gave_up, MAX_RESUMES)
+    for row in interrupted:
+        if _resume(row):
+            log.warning("resuming job %s (resume %d/%d)", row["job_id"], row["resumes"], MAX_RESUMES)
     reaper = asyncio.create_task(_reaper_loop())
     try:
         yield
@@ -1272,6 +1598,10 @@ def _payload(row: sqlite3.Row) -> dict[str, Any]:
         "mode": row["mode"],
         "concurrency": int(row["concurrency"]),
         "files": json.loads(row["filenames"] or "[]"),
+        # Additive: a caller watching a long batch can see that a restart was
+        # survived (and how close the job is to the MAX_RESUMES give-up point)
+        # instead of only seeing the clock stand still.
+        "resumes": int(row["resumes"] or 0),
         "error": row["error"],
     }
 
@@ -1311,6 +1641,9 @@ async def health() -> JSONResponse:
             "message": "Async batch job service",
             "queued": counts.get("queued", 0),
             "running": counts.get("running", 0),
+            # So an operator (or the watchdog) can see a 429 coming instead of
+            # only learning about the cap from a rejected submit.
+            "max_active": MAX_ACTIVE,
             "engines": sorted(ENGINES),
         }
     )
@@ -1354,6 +1687,22 @@ async def create_job(
         existing = await asyncio.to_thread(_replayable, key)
         if existing is not None:
             return JSONResponse(_payload(existing), status_code=202, headers={"X-Idempotency-Replay": "HIT"})
+
+    # Backpressure, and deliberately BELOW the replay above. A client that polls
+    # by resubmitting its Idempotency-Key is the client most likely to fill this
+    # queue, and answering its replays with 429 would lock it out of the status
+    # of the very jobs holding the slots — it could neither advance nor observe.
+    # A replay creates no new work, so there is nothing to shed.
+    active = await asyncio.to_thread(_active_count)
+    if active >= MAX_ACTIVE:
+        return _error(
+            "rate_limited",
+            f"{active} jobs are already queued or running (limit {MAX_ACTIVE}). "
+            "Wait for some to finish, or poll the jobs you have already submitted.",
+            429,
+            headers={"Retry-After": str(BACKPRESSURE_RETRY_AFTER)},
+            retry_after=BACKPRESSURE_RETRY_AFTER,
+        )
 
     raw_params: dict[str, Any] = {
         "use_ctc": use_ctc,
@@ -1457,6 +1806,7 @@ async def create_job(
         "mode": mode,
         "concurrency": concurrency,
         "files": [s["name"] for s in sources],
+        "resumes": 0,
         "error": None,
     }
     _TASKS[job_id] = asyncio.create_task(_run_job(job_id, engine, mode, concurrency, params, sources))

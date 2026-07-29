@@ -22,6 +22,26 @@
 # cloud) rather than looping back through nginx, so batch work isn't throttled
 # by the public rate limit — which is also why it must send ADAPTER_TOKEN itself.
 # No GPU of its own; needs outbound internet only for the cloud engine.
+#
+# MEMORY: capped at 2g. Previously uncapped, which on this 15 GB host meant a
+# single runaway job could starve the GPU stack and nginx alongside it. The
+# service is designed to sit far under that — pages are spilled to
+# `<job>/parts/` and the merge streams them, so steady state is tens of MB — and
+# the real spike is pypdf holding a source PDF at ~2.5x its size, now gated by
+# JOBS_MAX_SPLITS.
+#
+# What happens AT the limit: the kernel OOM-kills PID 1, the container exits
+# 137, and `restart: unless-stopped` brings it straight back. Because /data is a
+# named volume, the SQLite rows and every `<job>/parts/NNNNNN.json` survive the
+# kill, so the restarted process RESUMES the interrupted jobs and re-sends only
+# the pages that have no readable part file — an OOM kill costs the pages that
+# were in flight, not the batch. A job that OOMs the service repeatedly is
+# failed for real after JOBS_MAX_RESUMES (default 3) so the restart loop
+# terminates instead of grinding forever.
+# Both `mem_limit` and `deploy.resources.limits.memory` are set: plain
+# `docker compose up` honours only the former and ignores `deploy`, while
+# `docker stack deploy` (swarm) honours only the latter. One without the other
+# is a limit that silently does not apply in half the ways this gets run.
 
 name: jobs-adapter
 
@@ -50,6 +70,17 @@ services:
       JOBS_MAX_ATTEMPTS: ${JOBS_MAX_ATTEMPTS:-3}
       JOBS_PAGE_TIMEOUT: ${JOBS_PAGE_TIMEOUT:-600}
       JOBS_MAX_UPLOAD_MB: ${JOBS_MAX_UPLOAD_MB:-200}
+      # Concurrent pypdf splits. The split is the only phase MAX_INFLIGHT does
+      # not cover and it peaks at ~2.5x the source file, so it gets its own
+      # (small) gate. Raising this is the fastest way to OOM the 2g limit below.
+      JOBS_MAX_SPLITS: ${JOBS_MAX_SPLITS:-2}
+      # Queued+running ceiling; past it POST /jobs sheds load with 429 +
+      # Retry-After. Idempotency-Key replays of existing jobs still succeed.
+      JOBS_MAX_ACTIVE: ${JOBS_MAX_ACTIVE:-50}
+      # How many restarts one job may be resumed across before it is failed for
+      # real. This is what stops a job that kills the process from looping
+      # forever against `restart: unless-stopped`.
+      JOBS_MAX_RESUMES: ${JOBS_MAX_RESUMES:-3}
     volumes:
       - jobs-data:/data
     ports:
@@ -58,6 +89,13 @@ services:
       - ocrapi_default
       - surya
     restart: unless-stopped
+    # See the MEMORY note in the header: 2g, enforced under both compose
+    # (mem_limit) and swarm (deploy.resources.limits).
+    mem_limit: ${JOBS_MEM_LIMIT:-2g}
+    deploy:
+      resources:
+        limits:
+          memory: ${JOBS_MEM_LIMIT:-2g}
 
 volumes:
   # Survives `up -d --build` and `down` (NOT `down -v`): submitted jobs, their
