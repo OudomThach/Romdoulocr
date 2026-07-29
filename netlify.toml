@@ -67,10 +67,38 @@
   force = true
 
 # Versioned public entry point for third-party integrators (/v1/api/...).
-# nginx rewrites /v1/... internally, so both paths hit the same handlers.
+#
+# These are written out per engine, mapping straight to the UNVERSIONED upstream
+# path, rather than one catch-all `/v1/*` -> `/v1/:splat` rule. A catch-all works
+# for GET but returns 404 on POST: Netlify's redirect engine does not proxy POST
+# through a splat that spans several path segments ("api/ocr-image"), while the
+# single-segment splat below ("ocr-image") — the same shape as the /api/* rules
+# that already carry uploads — proxies POST correctly. Verified against a real
+# multipart upload.
+#
+# nginx ALSO understands /v1 natively (it rewrites internally), so callers hitting
+# the funnel host directly can use /v1 too; these rules only fix the Netlify hop.
 [[redirects]]
-  from = "/v1/*"
-  to = "https://apt-server-desktop.tail806605.ts.net/v1/:splat"
+  from = "/v1/api/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/v1/api-vllm/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-vllm/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/v1/api-lens/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-lens/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/v1/api-tidy/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-tidy/:splat"
   status = 200
   force = true
 
