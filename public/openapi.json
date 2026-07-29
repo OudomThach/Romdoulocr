@@ -1,0 +1,508 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Romdoul OCR API",
+    "version": "1.0.0",
+    "description": "Khmer document OCR over plain HTTP. Upload an image or PDF and get back text, layout regions, tables, and translations.\n\n**Three OCR engines answer the same five endpoints.** Swap the path prefix to switch engine — request and response shapes are identical:\n\n| Prefix | Engine | Notes |\n|---|---|---|\n| `/api` | Khmer Parsing API (cloud GPU) | Best Khmer accuracy, translation, confidence scores. Default. |\n| `/api-vllm` | Surya OCR 2 (self-hosted GPU) | Private processing, adjustable render DPI. No translation. |\n| `/api-lens` | Google Lens | Fast general text. No confidence, no table structure. |\n\nA fourth service, `/api-tidy`, reshapes an extracted table into tidy data.\n\n### Authentication\nThere is currently **no API key**. Anyone with this base URL can spend the service's GPU capacity — treat the URL as shared-secret and expect a key to be required in a future revision.\n\n### Practical notes\n- Send **one page per request** and run pages in parallel: it stays inside the ~26 s gateway ceiling, gives per-page progress, and fails narrowly on a bad page.\n- The cloud engine sleeps when idle; the first call after a quiet period can take ~22 s. Call `/api/health` before a batch to absorb that once.\n- `full_text` is occasionally an empty string even when regions contain text — fall back to joining `pages[].regions[].text`.\n- Image fields (`crop_base64`, `debug_image`) are **raw base64**; prepend `data:image/png;base64,` yourself.\n- Retry `502`/`504` once with backoff. Never retry a `4xx`."
+  },
+  "servers": [
+    { "url": "https://romdoulocr.netlify.app", "description": "Public" },
+    { "url": "http://localhost:8181", "description": "Local (home network)" }
+  ],
+  "tags": [
+    { "name": "Khmer Parsing API", "description": "Cloud GPU engine — the default. Highest Khmer accuracy, supports translation." },
+    { "name": "Surya OCR 2", "description": "Self-hosted GPU engine. Same contract; adds a `dpi` render-quality knob. No translation." },
+    { "name": "Google Lens", "description": "No GPU required. Good general text and photos; no confidence scores or table structure." },
+    { "name": "Transform to tidy", "description": "Reshape an extracted Markdown table into tidy data — one variable per column, one observation per row." }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["Khmer Parsing API"],
+        "summary": "Health check",
+        "description": "Cheap readiness probe. `200` means the engine will accept work. May take up to ~22 s on a cold start.",
+        "responses": {
+          "200": { "description": "Engine ready", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthCheckResponse" } } } },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api/ocr-image": {
+      "post": {
+        "tags": ["Khmer Parsing API"],
+        "summary": "Read a single image",
+        "description": "Returns the plain text of one image. No layout or structure — use `/parse-pdf` if you need either.",
+        "parameters": [{ "$ref": "#/components/parameters/UseCtc" }],
+        "requestBody": { "$ref": "#/components/requestBodies/SingleFile" },
+        "responses": {
+          "200": { "description": "Extracted text", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OcrImageResponse" } } } },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "502": { "$ref": "#/components/responses/BadGateway" }
+        }
+      }
+    },
+    "/api/parse-pdf": {
+      "post": {
+        "tags": ["Khmer Parsing API"],
+        "summary": "Extract a document with layout",
+        "description": "Full document extraction. Returns every page with its layout regions — headings, paragraphs, tables, figures — each with text, a bounding box, and a confidence score.\n\nThe `files` field is **plural** and repeatable: send it more than once to merge several inputs into a single document with renumbered pages.",
+        "parameters": [
+          { "$ref": "#/components/parameters/DetectLayout" },
+          { "$ref": "#/components/parameters/DetectLines" },
+          { "$ref": "#/components/parameters/UseCtc" }
+        ],
+        "requestBody": { "$ref": "#/components/requestBodies/MultiFile" },
+        "responses": {
+          "200": { "description": "Parsed document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocumentResult" } } } },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "504": { "$ref": "#/components/responses/Timeout" }
+        }
+      }
+    },
+    "/api/parse-pdf-translated": {
+      "post": {
+        "tags": ["Khmer Parsing API"],
+        "summary": "Extract a document and translate it",
+        "description": "Identical to `/parse-pdf`, plus `translated_text` on the response.",
+        "parameters": [
+          { "$ref": "#/components/parameters/SourceLang" },
+          { "$ref": "#/components/parameters/TargetLang" },
+          { "$ref": "#/components/parameters/DetectLayout" },
+          { "$ref": "#/components/parameters/DetectLines" },
+          { "$ref": "#/components/parameters/UseCtc" }
+        ],
+        "requestBody": { "$ref": "#/components/requestBodies/MultiFile" },
+        "responses": {
+          "200": { "description": "Parsed document with translation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocumentResult" } } } },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "504": { "$ref": "#/components/responses/Timeout" }
+        }
+      }
+    },
+    "/api/parse-table": {
+      "post": {
+        "tags": ["Khmer Parsing API"],
+        "summary": "Extract table structure",
+        "description": "Returns rows, columns and cells — each cell with its grid position, text, bounding box and confidence, enough to rebuild the table as CSV or a spreadsheet.\n\nWhen no table is detected you get the page text as a single-column grid rather than an empty result.",
+        "parameters": [
+          { "$ref": "#/components/parameters/RowTolerance" },
+          { "$ref": "#/components/parameters/UseCtc" }
+        ],
+        "requestBody": { "$ref": "#/components/requestBodies/SingleFile" },
+        "responses": {
+          "200": { "description": "Table grid", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TableResult" } } } },
+          "502": { "$ref": "#/components/responses/BadGateway" }
+        }
+      }
+    },
+
+    "/api-vllm/health": {
+      "get": {
+        "tags": ["Surya OCR 2"],
+        "summary": "Health check",
+        "description": "Returns `503` with `models_loaded: false` when the GPU service is unreachable. This engine depends on a machine that is not always online — fall back to `/api` on `503`.",
+        "responses": {
+          "200": { "description": "Engine ready", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthCheckResponse" } } } },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api-vllm/ocr-image": {
+      "post": {
+        "tags": ["Surya OCR 2"],
+        "summary": "Read a single image",
+        "description": "Images are preprocessed (deskew, upscale, sharpen) before recognition to meet the model's minimum input quality on old or blurry scans.",
+        "parameters": [{ "$ref": "#/components/parameters/Dpi" }],
+        "requestBody": { "$ref": "#/components/requestBodies/SingleFile" },
+        "responses": {
+          "200": { "description": "Extracted text", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OcrImageResponse" } } } },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api-vllm/parse-pdf": {
+      "post": {
+        "tags": ["Surya OCR 2"],
+        "summary": "Extract a document with layout",
+        "parameters": [{ "$ref": "#/components/parameters/Dpi" }],
+        "requestBody": { "$ref": "#/components/requestBodies/MultiFile" },
+        "responses": {
+          "200": { "description": "Parsed document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocumentResult" } } } },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api-vllm/parse-pdf-translated": {
+      "post": {
+        "tags": ["Surya OCR 2"],
+        "summary": "Extract a document (translation NOT supported)",
+        "description": "Accepted for contract compatibility, but this engine cannot translate — `translated_text` is always `null`. Use `/api` or `/api-lens` for translation.",
+        "parameters": [{ "$ref": "#/components/parameters/Dpi" }],
+        "requestBody": { "$ref": "#/components/requestBodies/MultiFile" },
+        "responses": {
+          "200": { "description": "Parsed document, `translated_text` null", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocumentResult" } } } },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api-vllm/parse-table": {
+      "post": {
+        "tags": ["Surya OCR 2"],
+        "summary": "Extract table structure",
+        "parameters": [{ "$ref": "#/components/parameters/Dpi" }],
+        "requestBody": { "$ref": "#/components/requestBodies/SingleFile" },
+        "responses": {
+          "200": { "description": "Table grid", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TableResult" } } } },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api-lens/health": {
+      "get": {
+        "tags": ["Google Lens"],
+        "summary": "Health check",
+        "responses": {
+          "200": { "description": "Engine ready", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthCheckResponse" } } } }
+        }
+      }
+    },
+    "/api-lens/ocr-image": {
+      "post": {
+        "tags": ["Google Lens"],
+        "summary": "Read a single image",
+        "description": "`confidence` is always `0` — this engine does not report one.",
+        "requestBody": { "$ref": "#/components/requestBodies/SingleFile" },
+        "responses": {
+          "200": { "description": "Extracted text", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OcrImageResponse" } } } },
+          "502": { "$ref": "#/components/responses/BadGateway" }
+        }
+      }
+    },
+    "/api-lens/parse-pdf": {
+      "post": {
+        "tags": ["Google Lens"],
+        "summary": "Extract a document with layout",
+        "description": "Words are grouped into lines by vertical proximity; one region per line. Region confidence is synthetic.",
+        "requestBody": { "$ref": "#/components/requestBodies/MultiFile" },
+        "responses": {
+          "200": { "description": "Parsed document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocumentResult" } } } },
+          "502": { "$ref": "#/components/responses/BadGateway" }
+        }
+      }
+    },
+    "/api-lens/parse-pdf-translated": {
+      "post": {
+        "tags": ["Google Lens"],
+        "summary": "Extract a document and translate it",
+        "parameters": [
+          { "$ref": "#/components/parameters/SourceLang" },
+          { "$ref": "#/components/parameters/TargetLang" }
+        ],
+        "requestBody": { "$ref": "#/components/requestBodies/MultiFile" },
+        "responses": {
+          "200": { "description": "Parsed document with translation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocumentResult" } } } },
+          "502": { "$ref": "#/components/responses/BadGateway" }
+        }
+      }
+    },
+    "/api-lens/parse-table": {
+      "post": {
+        "tags": ["Google Lens"],
+        "summary": "Extract table structure (best effort)",
+        "description": "Lens has no table model. A grid is reconstructed from word geometry — rows by vertical proximity, columns by horizontal whitespace gaps — and falls back to a single-column line list when no columns are detected.",
+        "requestBody": { "$ref": "#/components/requestBodies/SingleFile" },
+        "responses": {
+          "200": { "description": "Table grid", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TableResult" } } } },
+          "502": { "$ref": "#/components/responses/BadGateway" }
+        }
+      }
+    },
+
+    "/api-tidy/health": {
+      "get": {
+        "tags": ["Transform to tidy"],
+        "summary": "Health check",
+        "description": "`ready` only reports that a model credential is **present**, not that it is valid — an expired key still shows `ready: true` while `/tidy` returns `502`.",
+        "responses": {
+          "200": {
+            "description": "Service status",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TidyHealth" } } }
+          }
+        }
+      }
+    },
+    "/api-tidy/tidy": {
+      "post": {
+        "tags": ["Transform to tidy"],
+        "summary": "Reshape a table into tidy data",
+        "description": "The only endpoint that takes **JSON, not multipart**.\n\nGive it a Markdown table and it returns tidy data: wide year-columns are unpivoted into rows, total rows dropped, and section headings pushed down into their own column.\n\n`tidy_csv` uses CRLF line endings — prepend a UTF-8 BOM before writing a file Excel will open, or Khmer text will mojibake.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TidyRequest" },
+              "example": {
+                "markdown": "| Province | 2021 | 2022 |\n| --- | --- | --- |\n| Phnom Penh | 10 | 12 |\n| Siem Reap | 7 | 9 |"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Tidy table", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TidyResponse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "422": { "description": "The model declined the input", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": {
+            "description": "Model rate limit or quota reached. Honour the `Retry-After` header.",
+            "headers": { "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds to wait" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "503": { "description": "No model credential configured", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    }
+  },
+
+  "components": {
+    "parameters": {
+      "UseCtc": {
+        "name": "use_ctc", "in": "query", "required": false,
+        "description": "CTC decoder. Recommended for Khmer — the autoregressive decoder can fall into repetition loops on noisy scans.",
+        "schema": { "type": "boolean", "default": true }
+      },
+      "DetectLayout": {
+        "name": "detect_layout", "in": "query", "required": false,
+        "description": "Detect layout regions. Turn off to force a single whole-page read (useful for signs and photos).",
+        "schema": { "type": "boolean", "default": true }
+      },
+      "DetectLines": {
+        "name": "detect_lines", "in": "query", "required": false,
+        "description": "Emit per-line bounding boxes inside each region.",
+        "schema": { "type": "boolean", "default": true }
+      },
+      "SourceLang": {
+        "name": "source_lang", "in": "query", "required": false,
+        "description": "Source language hint, e.g. `km`.",
+        "schema": { "type": "string", "example": "km" }
+      },
+      "TargetLang": {
+        "name": "target_lang", "in": "query", "required": false,
+        "description": "Target language, e.g. `en`.",
+        "schema": { "type": "string", "example": "en" }
+      },
+      "RowTolerance": {
+        "name": "row_tolerance", "in": "query", "required": false,
+        "description": "Pixel slack when grouping cells into rows. Raise it for skewed scans.",
+        "schema": { "type": "integer", "default": 20, "minimum": 1 }
+      },
+      "Dpi": {
+        "name": "dpi", "in": "query", "required": false,
+        "description": "Render resolution for the self-hosted engine: 96 draft, 150 default, 300 for small print. Ignored by other engines.",
+        "schema": { "type": "integer", "default": 150, "enum": [96, 150, 300] }
+      }
+    },
+
+    "requestBodies": {
+      "SingleFile": {
+        "required": true,
+        "description": "Multipart upload. Field name is **`file`** (singular).",
+        "content": {
+          "multipart/form-data": {
+            "schema": {
+              "type": "object",
+              "required": ["file"],
+              "properties": {
+                "file": { "type": "string", "format": "binary", "description": "PNG, JPG, WEBP, BMP or TIFF" }
+              }
+            }
+          }
+        }
+      },
+      "MultiFile": {
+        "required": true,
+        "description": "Multipart upload. Field name is **`files`** (plural, repeatable).",
+        "content": {
+          "multipart/form-data": {
+            "schema": {
+              "type": "object",
+              "required": ["files"],
+              "properties": {
+                "files": {
+                  "type": "array",
+                  "items": { "type": "string", "format": "binary" },
+                  "description": "PDF or image files. Repeat the field to merge several into one document."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "responses": {
+      "BadRequest": { "description": "Malformed request — check the upload field name (`file` singular vs `files` plural)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "TooLarge": { "description": "Upload exceeds 100 MB — split the document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "BadGateway": { "description": "The engine failed. Retry once with backoff.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unavailable": { "description": "Engine not ready (GPU loading or offline). Poll `/health`, or fall back to `/api`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Timeout": { "description": "Upstream timed out — send fewer pages per request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": { "detail": { "type": "string", "description": "Human-readable explanation, safe to show a user." } },
+        "example": { "detail": "vLLM backend unreachable" }
+      },
+      "HealthCheckResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "ok" },
+          "models_loaded": { "type": "boolean", "example": true },
+          "message": { "type": "string", "nullable": true, "example": "All models loaded and ready" }
+        }
+      },
+      "TidyHealth": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "ok" },
+          "ready": { "type": "boolean", "description": "A credential is present (not validated)", "example": true },
+          "provider": { "type": "string", "example": "gemini" },
+          "model": { "type": "string", "example": "gemini-2.5-flash-lite" },
+          "pipeline": { "type": "string", "enum": ["never", "auto", "always"], "description": "How many model calls a transform may spend" },
+          "message": { "type": "string" }
+        }
+      },
+      "OcrImageResponse": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "confidence": { "type": "number", "format": "float", "description": "0–1. Always 0 on the Google Lens engine.", "example": 0.94 },
+          "filename": { "type": "string" },
+          "decoder": { "type": "string", "example": "ctc" }
+        },
+        "example": { "filename": "scan.png", "text": "ព្រះរាជាណាចក្រកម្ពុជា", "confidence": 0.94, "decoder": "ctc" }
+      },
+      "BoundingBox": {
+        "type": "object",
+        "description": "Four corners in page-pixel space, clockwise from top-left — a rotated region keeps its true shape.",
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+            "minItems": 4, "maxItems": 4,
+            "example": [[120, 340], [880, 340], [880, 402], [120, 402]]
+          },
+          "confidence": { "type": "number", "format": "float" }
+        }
+      },
+      "TextLine": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "confidence": { "type": "number", "format": "float" },
+          "bbox": { "$ref": "#/components/schemas/BoundingBox" },
+          "khmer_text": { "type": "string", "nullable": true },
+          "english_text": { "type": "string", "nullable": true }
+        }
+      },
+      "LayoutRegion": {
+        "type": "object",
+        "properties": {
+          "region_type": {
+            "type": "string",
+            "enum": ["text", "title", "section-header", "table", "list-item", "caption", "footnote", "picture", "figure"]
+          },
+          "text": { "type": "string" },
+          "confidence": { "type": "number", "format": "float" },
+          "bbox": { "$ref": "#/components/schemas/BoundingBox" },
+          "lines": { "type": "array", "items": { "$ref": "#/components/schemas/TextLine" } },
+          "crop_base64": { "type": "string", "nullable": true, "description": "RAW base64 PNG (no data: prefix) for picture/figure regions" },
+          "khmer_text": { "type": "string", "nullable": true },
+          "english_text": { "type": "string", "nullable": true }
+        }
+      },
+      "PageResult": {
+        "type": "object",
+        "properties": {
+          "page_number": { "type": "integer", "example": 1 },
+          "width": { "type": "integer", "example": 1654 },
+          "height": { "type": "integer", "example": 2339 },
+          "regions": { "type": "array", "items": { "$ref": "#/components/schemas/LayoutRegion" } }
+        }
+      },
+      "DocumentResult": {
+        "type": "object",
+        "properties": {
+          "filename": { "type": "string" },
+          "num_pages": { "type": "integer" },
+          "pages": { "type": "array", "items": { "$ref": "#/components/schemas/PageResult" } },
+          "full_text": { "type": "string", "nullable": true, "description": "May be an empty string even when regions contain text — fall back to joining region text." },
+          "translated_text": { "type": "string", "nullable": true },
+          "table_crops": { "type": "array", "items": { "type": "object" } },
+          "figure_crops": { "type": "array", "items": { "type": "object" } },
+          "image_crops": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "TableCell": {
+        "type": "object",
+        "properties": {
+          "row": { "type": "integer" },
+          "col": { "type": "integer" },
+          "text": { "type": "string" },
+          "confidence": { "type": "number", "format": "float" },
+          "bbox": { "$ref": "#/components/schemas/BoundingBox" }
+        }
+      },
+      "TableResult": {
+        "type": "object",
+        "properties": {
+          "filename": { "type": "string" },
+          "num_rows": { "type": "integer", "example": 12 },
+          "num_cols": { "type": "integer", "example": 5 },
+          "cells": { "type": "array", "items": { "$ref": "#/components/schemas/TableCell" } },
+          "structured_text": { "type": "string", "description": "Tab-separated rows" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" },
+          "debug_image": { "type": "string", "nullable": true, "description": "RAW base64 PNG (no data: prefix)" }
+        }
+      },
+      "TidyRequest": {
+        "type": "object",
+        "required": ["markdown"],
+        "properties": {
+          "markdown": { "type": "string", "description": "A Markdown table, max 200 000 characters." },
+          "instructions": { "type": "string", "nullable": true, "description": "Optional extra guidance for the reshape." }
+        }
+      },
+      "TidyResponse": {
+        "type": "object",
+        "properties": {
+          "columns": { "type": "array", "items": { "type": "string" } },
+          "rows": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+          "tidy_markdown": { "type": "string" },
+          "tidy_csv": { "type": "string", "description": "CRLF line endings. Prepend a UTF-8 BOM for Excel." },
+          "notes": { "type": "string", "description": "One or two sentences on what changed." },
+          "model": { "type": "string" },
+          "method": { "type": "string", "enum": ["single", "pipeline"], "description": "`single` = one model call; `pipeline` = diagnose → strategy → generated pandas, executed sandboxed." },
+          "log": { "type": "array", "items": { "type": "string" }, "description": "Per-step log (pipeline only)" },
+          "code": { "type": "string", "description": "The generated pandas code that was executed (pipeline only)" },
+          "fallback_reason": { "type": "string", "description": "Present only if the pipeline fell back to a single pass" }
+        },
+        "example": {
+          "columns": ["Province", "Year", "Value"],
+          "rows": [["Phnom Penh", "2021", "10"], ["Phnom Penh", "2022", "12"]],
+          "tidy_markdown": "| Province | Year | Value |\n| --- | --- | --- |\n| Phnom Penh | 2021 | 10 |",
+          "tidy_csv": "Province,Year,Value\r\nPhnom Penh,2021,10\r\n",
+          "notes": "Unpivoted the year columns into rows.",
+          "model": "gemini-2.5-flash-lite",
+          "method": "single"
+        }
+      }
+    }
+  }
+}
