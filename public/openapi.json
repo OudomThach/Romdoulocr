@@ -3,7 +3,7 @@
   "info": {
     "title": "Romdoul OCR API",
     "version": "1.0.0",
-    "description": "Khmer document OCR over plain HTTP. Upload an image or PDF and get back text, layout regions, tables, and translations.\n\n**Three OCR engines answer the same five endpoints.** Swap the path prefix to switch engine — request and response shapes are identical:\n\n| Prefix | Engine | Notes |\n|---|---|---|\n| `/api` | Khmer Parsing API (cloud GPU) | Best Khmer accuracy, translation, confidence scores. Default. |\n| `/api-vllm` | Surya OCR 2 (self-hosted GPU) | Private processing, adjustable render DPI. No translation. |\n| `/api-lens` | Google Lens | Fast general text. No confidence, no table structure. |\n\nA fourth service, `/api-tidy`, reshapes an extracted table into tidy data.\n\n### Authentication\nThere is currently **no API key**. Anyone with this base URL can spend the service's GPU capacity — treat the URL as shared-secret and expect a key to be required in a future revision.\n\n### Practical notes\n- Send **one page per request** and run pages in parallel: it stays inside the ~26 s gateway ceiling, gives per-page progress, and fails narrowly on a bad page.\n- The cloud engine sleeps when idle; the first call after a quiet period can take ~22 s. Call `/api/health` before a batch to absorb that once.\n- `full_text` is occasionally an empty string even when regions contain text — fall back to joining `pages[].regions[].text`.\n- Image fields (`crop_base64`, `debug_image`) are **raw base64**; prepend `data:image/png;base64,` yourself.\n- Retry `502`/`504` once with backoff. Never retry a `4xx`."
+    "description": "Khmer document OCR over plain HTTP. Upload an image or PDF and get back text, layout regions, tables, and translations.\n\n**Three OCR engines answer the same five endpoints.** Swap the path prefix to switch engine — request and response shapes are identical:\n\n| Prefix | Engine | Notes |\n|---|---|---|\n| `/api` | Khmer Parsing API (cloud GPU) | Best Khmer accuracy, translation, confidence scores. Default. |\n| `/api-vllm` | Surya OCR 2 (self-hosted GPU) | Private processing, adjustable render DPI. No translation. |\n| `/api-lens` | Google Lens | Fast general text. No confidence, no table structure. |\n\n### Authentication\nThere is currently **no API key**. Anyone with this base URL can spend the service's GPU capacity — treat the URL as shared-secret and expect a key to be required in a future revision.\n\n### Practical notes\n- Send **one page per request** and run pages in parallel: it stays inside the ~26 s gateway ceiling, gives per-page progress, and fails narrowly on a bad page.\n- The cloud engine sleeps when idle; the first call after a quiet period can take ~22 s. Call `/api/health` before a batch to absorb that once.\n- `full_text` is occasionally an empty string even when regions contain text — fall back to joining `pages[].regions[].text`.\n- Image fields (`crop_base64`, `debug_image`) are **raw base64**; prepend `data:image/png;base64,` yourself.\n- Retry `502`/`504` once with backoff. Never retry a `4xx`."
   },
   "servers": [
     { "url": "https://romdoulocr.netlify.app", "description": "Public" },
@@ -12,8 +12,7 @@
   "tags": [
     { "name": "Khmer Parsing API", "description": "Cloud GPU engine — the default. Highest Khmer accuracy, supports translation." },
     { "name": "Surya OCR 2", "description": "Self-hosted GPU engine. Same contract; adds a `dpi` render-quality knob. No translation." },
-    { "name": "Google Lens", "description": "No GPU required. Good general text and photos; no confidence scores or table structure." },
-    { "name": "Transform to tidy", "description": "Reshape an extracted Markdown table into tidy data — one variable per column, one observation per row." }
+    { "name": "Google Lens", "description": "No GPU required. Good general text and photos; no confidence scores or table structure." }
   ],
   "paths": {
     "/api/health": {
@@ -220,51 +219,6 @@
           "502": { "$ref": "#/components/responses/BadGateway" }
         }
       }
-    },
-
-    "/api-tidy/health": {
-      "get": {
-        "tags": ["Transform to tidy"],
-        "summary": "Health check",
-        "description": "`ready` only reports that a model credential is **present**, not that it is valid — an expired key still shows `ready: true` while `/tidy` returns `502`.",
-        "responses": {
-          "200": {
-            "description": "Service status",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TidyHealth" } } }
-          }
-        }
-      }
-    },
-    "/api-tidy/tidy": {
-      "post": {
-        "tags": ["Transform to tidy"],
-        "summary": "Reshape a table into tidy data",
-        "description": "The only endpoint that takes **JSON, not multipart**.\n\nGive it a Markdown table and it returns tidy data: wide year-columns are unpivoted into rows, total rows dropped, and section headings pushed down into their own column.\n\n`tidy_csv` uses CRLF line endings — prepend a UTF-8 BOM before writing a file Excel will open, or Khmer text will mojibake.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/TidyRequest" },
-              "example": {
-                "markdown": "| Province | 2021 | 2022 |\n| --- | --- | --- |\n| Phnom Penh | 10 | 12 |\n| Siem Reap | 7 | 9 |"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Tidy table", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TidyResponse" } } } },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "413": { "$ref": "#/components/responses/TooLarge" },
-          "422": { "description": "The model declined the input", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-          "429": {
-            "description": "Model rate limit or quota reached. Honour the `Retry-After` header.",
-            "headers": { "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds to wait" } },
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
-          },
-          "502": { "$ref": "#/components/responses/BadGateway" },
-          "503": { "description": "No model credential configured", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
-        }
-      }
     }
   },
 
@@ -366,17 +320,6 @@
           "message": { "type": "string", "nullable": true, "example": "All models loaded and ready" }
         }
       },
-      "TidyHealth": {
-        "type": "object",
-        "properties": {
-          "status": { "type": "string", "example": "ok" },
-          "ready": { "type": "boolean", "description": "A credential is present (not validated)", "example": true },
-          "provider": { "type": "string", "example": "gemini" },
-          "model": { "type": "string", "example": "gemini-2.5-flash-lite" },
-          "pipeline": { "type": "string", "enum": ["never", "auto", "always"], "description": "How many model calls a transform may spend" },
-          "message": { "type": "string" }
-        }
-      },
       "OcrImageResponse": {
         "type": "object",
         "properties": {
@@ -469,38 +412,6 @@
           "width": { "type": "integer" },
           "height": { "type": "integer" },
           "debug_image": { "type": "string", "nullable": true, "description": "RAW base64 PNG (no data: prefix)" }
-        }
-      },
-      "TidyRequest": {
-        "type": "object",
-        "required": ["markdown"],
-        "properties": {
-          "markdown": { "type": "string", "description": "A Markdown table, max 200 000 characters." },
-          "instructions": { "type": "string", "nullable": true, "description": "Optional extra guidance for the reshape." }
-        }
-      },
-      "TidyResponse": {
-        "type": "object",
-        "properties": {
-          "columns": { "type": "array", "items": { "type": "string" } },
-          "rows": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
-          "tidy_markdown": { "type": "string" },
-          "tidy_csv": { "type": "string", "description": "CRLF line endings. Prepend a UTF-8 BOM for Excel." },
-          "notes": { "type": "string", "description": "One or two sentences on what changed." },
-          "model": { "type": "string" },
-          "method": { "type": "string", "enum": ["single", "pipeline"], "description": "`single` = one model call; `pipeline` = diagnose → strategy → generated pandas, executed sandboxed." },
-          "log": { "type": "array", "items": { "type": "string" }, "description": "Per-step log (pipeline only)" },
-          "code": { "type": "string", "description": "The generated pandas code that was executed (pipeline only)" },
-          "fallback_reason": { "type": "string", "description": "Present only if the pipeline fell back to a single pass" }
-        },
-        "example": {
-          "columns": ["Province", "Year", "Value"],
-          "rows": [["Phnom Penh", "2021", "10"], ["Phnom Penh", "2022", "12"]],
-          "tidy_markdown": "| Province | Year | Value |\n| --- | --- | --- |\n| Phnom Penh | 2021 | 10 |",
-          "tidy_csv": "Province,Year,Value\r\nPhnom Penh,2021,10\r\n",
-          "notes": "Unpivoted the year columns into rows.",
-          "model": "gemini-2.5-flash-lite",
-          "method": "single"
         }
       }
     }
