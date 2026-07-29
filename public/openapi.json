@@ -31,6 +31,14 @@
     {
       "name": "Google Lens",
       "description": "No GPU required. Good general text and photos; no confidence scores or table structure."
+    },
+    {
+      "name": "Batch jobs",
+      "description": "Submit a document once, poll for progress, fetch the merged result. Use this for bulk extraction instead of holding a connection open per page."
+    },
+    {
+      "name": "Service",
+      "description": "Cross-engine service endpoints."
     }
   ],
   "paths": {
@@ -596,6 +604,437 @@
           }
         ]
       }
+    },
+    "/status": {
+      "get": {
+        "tags": [
+          "Service"
+        ],
+        "summary": "Aggregate engine status",
+        "description": "Every engine's liveness in one call, so you do not have to poll three `/health` endpoints to pick a backend.\n\nAlways returns **HTTP 200**, even when `status` is `\"down\"` — a non-200 here would be indistinguishable from the status service itself failing, which is exactly the ambiguity you are polling to resolve. **Branch on the `status` field in the body, never on the HTTP code.**\n\nPer-engine `state`:\n\n| `state` | `up` | Meaning |\n|---|---|---|\n| `up` | `true` | Answering normally. Send work here. |\n| `warming` | `true` | Missed the probe deadline but answered recently — almost always the cloud engine scaling from zero. Usable; expect a slow first request. |\n| `not_ready` | `false` | Reachable, but reports its models are not loaded. |\n| `down` | `false` | Unreachable, or failing for longer than the cold-start grace window. |\n\nThe rollup is `ok` only when **every** engine is `up`; `degraded` when at least one engine is usable but not all are fast; `down` when none are usable.\n\nResults are cached for a few seconds (`cache_ttl_s`), so polling this endpoint is cheap. `X-Status-Cache` reports `HIT`, `MISS`, or `STALE`.\n\n**Limitation:** this endpoint is served from the same host as the self-hosted engines. It tells you *which engine to use while the service is reachable* — it cannot tell you the service is down. If `/v1/status` does not answer at all, treat the whole deployment as unavailable.",
+        "responses": {
+          "200": {
+            "description": "Current status of every engine (returned even when engines are down)",
+            "headers": {
+              "X-Status-Cache": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS",
+                    "STALE"
+                  ]
+                },
+                "description": "Whether this answer came from the short-lived cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api-jobs/jobs": {
+      "post": {
+        "tags": [
+          "Batch jobs"
+        ],
+        "summary": "Submit a batch job",
+        "description": "The upload is accepted and a job created immediately — OCR runs in the background, so this returns in milliseconds no matter how large the document.\n\nPDFs are split and processed ONE PAGE PER REQUEST with bounded concurrency, then merged back in page order with `page_number` renumbered 1..N. A page that keeps failing is recorded and the job finishes as `partial` rather than dying.\n\nSend an `Idempotency-Key` and a repeat submission returns the SAME `job_id` instead of queueing duplicate work — this is what makes pipeline retries safe.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "engine",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cloud",
+                "vllm",
+                "lens"
+              ],
+              "default": "cloud"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "parse-pdf",
+                "parse-pdf-translated",
+                "ocr-image",
+                "parse-table"
+              ],
+              "default": "parse-pdf"
+            }
+          },
+          {
+            "name": "concurrency",
+            "in": "query",
+            "description": "Pages in flight for this job (clamped to 1..8).",
+            "schema": {
+              "type": "integer",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 8
+            }
+          },
+          {
+            "$ref": "#/components/parameters/TargetLang"
+          },
+          {
+            "$ref": "#/components/parameters/SourceLang"
+          },
+          {
+            "$ref": "#/components/parameters/UseCtc"
+          },
+          {
+            "$ref": "#/components/parameters/DetectLayout"
+          },
+          {
+            "$ref": "#/components/parameters/DetectLines"
+          },
+          {
+            "$ref": "#/components/parameters/Dpi"
+          },
+          {
+            "$ref": "#/components/parameters/RowTolerance"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Multipart upload. Field name is **`files`** (plural, repeatable).",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "files"
+                ],
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Job accepted and queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Upload too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Batch jobs"
+        ],
+        "summary": "List recent jobs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Job"
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api-jobs/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "Batch jobs"
+        ],
+        "summary": "Poll job status",
+        "description": "Poll until `status` is terminal (`succeeded`, `partial`, `failed`, `cancelled`). A few seconds between polls is plenty.",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current job state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Batch jobs"
+        ],
+        "summary": "Cancel and delete a job",
+        "description": "Cancels the work if it is still running, then removes the job's stored state and result files.",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled and deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "previous_status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api-jobs/jobs/{job_id}/result": {
+      "get": {
+        "tags": [
+          "Batch jobs"
+        ],
+        "summary": "Fetch the merged result",
+        "description": "Available once the job reaches a terminal state. For `parse-pdf` modes this is a single merged DocumentResult covering every page; for `ocr-image` / `parse-table` it is a list, one entry per input.\n\nA `partial` job still returns a result — failed pages appear as placeholders carrying `error` and `error_code`, so page numbering stays aligned with the source document.",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merged result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DocumentResult"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job has not finished yet — keep polling",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api-jobs/health": {
+      "get": {
+        "tags": [
+          "Batch jobs"
+        ],
+        "summary": "Job service health",
+        "responses": {
+          "200": {
+            "description": "Service state plus queue depth",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "models_loaded": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "queued": {
+                      "type": "integer"
+                    },
+                    "running": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -822,7 +1261,9 @@
                   "engine_timeout",
                   "engine_not_ready",
                   "bad_request",
-                  "input_declined"
+                  "input_declined",
+                  "job_not_found",
+                  "job_not_finished"
                 ]
               },
               "message": {
@@ -1130,6 +1571,201 @@
             "nullable": true,
             "description": "RAW base64 PNG (no data: prefix)"
           }
+        }
+      },
+      "StatusResponse": {
+        "type": "object",
+        "description": "Aggregate liveness of every OCR engine.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ],
+            "description": "`ok` = every engine is up and fast. `degraded` = at least one engine is usable, but not all are fast. `down` = no engine is usable."
+          },
+          "engines": {
+            "type": "object",
+            "description": "Keyed by engine id: `cloud`, `vllm`, `lens`.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EngineStatus"
+            }
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this snapshot was measured (UTC). May be up to `cache_ttl_s` old.",
+            "example": "2026-07-29T13:41:02Z"
+          },
+          "cache_ttl_s": {
+            "type": "integer",
+            "description": "Seconds this result is reused before a fresh fan-out. Polling faster than this returns a cached answer.",
+            "example": 5
+          }
+        },
+        "example": {
+          "status": "degraded",
+          "engines": {
+            "cloud": {
+              "prefix": "/api",
+              "up": true,
+              "state": "up",
+              "latency_ms": 923,
+              "http_status": 200,
+              "models_loaded": true,
+              "detail": "All models loaded and ready"
+            },
+            "vllm": {
+              "prefix": "/api-vllm",
+              "up": false,
+              "state": "down",
+              "latency_ms": 2001,
+              "http_status": null,
+              "models_loaded": null,
+              "detail": "ConnectTimeout contacting vllm-adapter:8090"
+            },
+            "lens": {
+              "prefix": "/api-lens",
+              "up": true,
+              "state": "up",
+              "latency_ms": 4,
+              "http_status": 200,
+              "models_loaded": true,
+              "detail": "Google Lens backend"
+            }
+          },
+          "generated_at": "2026-07-29T13:41:02Z",
+          "cache_ttl_s": 5
+        }
+      },
+      "EngineStatus": {
+        "type": "object",
+        "properties": {
+          "prefix": {
+            "type": "string",
+            "description": "Path prefix to call this engine on, e.g. `/api-lens`. Append it to the server URL.",
+            "example": "/api-lens"
+          },
+          "up": {
+            "type": "boolean",
+            "description": "Whether it is worth sending work here. True for both `up` and `warming`."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "up",
+              "warming",
+              "not_ready",
+              "down"
+            ],
+            "description": "`warming` means the engine missed the probe deadline but answered recently — usually a cold start, not an outage."
+          },
+          "latency_ms": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Round-trip time of the health probe. On a failed probe this is the time spent before giving up, not a service latency.",
+            "example": 923
+          },
+          "http_status": {
+            "type": "integer",
+            "nullable": true,
+            "description": "HTTP status the engine's own /health returned; null when it could not be reached."
+          },
+          "models_loaded": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "As reported by the engine's /health. Null when unknown."
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true,
+            "description": "Human-readable context — the engine's health message, or why the probe failed. Do NOT branch on this."
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "description": "`partial` means the job finished but at least one page failed — the result is still usable."
+          },
+          "progress": {
+            "type": "object",
+            "properties": {
+              "done": {
+                "type": "integer"
+              },
+              "total": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              }
+            }
+          },
+          "engine": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "concurrency": {
+            "type": "integer"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "finished_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "job_id": "job_01J...",
+          "status": "running",
+          "progress": {
+            "done": 7,
+            "total": 42,
+            "failed": 0
+          },
+          "engine": "cloud",
+          "mode": "parse-pdf",
+          "concurrency": 3,
+          "files": [
+            "report.pdf"
+          ],
+          "created_at": "2026-07-29T14:02:11Z",
+          "started_at": "2026-07-29T14:02:11Z",
+          "finished_at": null,
+          "error": null
         }
       }
     }

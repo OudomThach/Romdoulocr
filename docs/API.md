@@ -273,6 +273,34 @@ will open, or Khmer mojibakes.
 
 ---
 
+## 4b. Availability — read this before you depend on it
+
+**There is no SLA. This is best-effort.** Be explicit with anyone integrating:
+
+| Engine | Depends on the home PC? | Notes |
+|---|---|---|
+| `/api` (cloud) via **the SPA** | **No** | Netlify proxies straight to Modal, so it survives the desktop being asleep or rebooting |
+| `/v1/api/*` (cloud, integrators) | Yes | Routed through home nginx, which is where rate limiting, structured errors and idempotency live |
+| `/v1/api-vllm/*`, `/v1/api-lens/*` | **Yes** | These engines physically run on that machine |
+| `/v1/api-jobs/*` | **Yes** | Job state lives on that machine |
+
+A watchdog repairs the stack every 2 minutes, so it is **self-healing, not highly available**:
+expect occasional multi-minute gaps, and a hard outage if the machine is off, has no
+internet, or reboots without anyone logging in.
+
+**What an integrator should do about it**
+
+- Poll `GET /v1/status` and pick an engine with `up: true`. One call covers all three.
+- Treat `state: "warming"` as usable-but-slow (a cold cloud engine takes ~20s), not down.
+- **If `/v1/status` itself does not answer, assume the whole deployment is unavailable** — it
+  runs on the same machine as the self-hosted engines, so it cannot report its own host being
+  down.
+- Retry `502`/`503`/`504` with backoff; honour `Retry-After` on `429`.
+- **Always send `Idempotency-Key` when retrying or failing over**, so a request that actually
+  landed is replayed instead of re-running and double-spending GPU time.
+- For anything large, use the batch job API — it survives a dropped connection, which a
+  synchronous call does not.
+
 ## 5. Errors
 
 Every service returns `{"detail": "..."}` on failure.

@@ -1,0 +1,86 @@
+# Asynchronous batch job service for the Romdoul OCR API.
+#
+# Submit a batch once (POST /jobs -> 202 + job_id), poll for progress, fetch the
+# merged result. The service splits PDFs into single pages and drives the OCR
+# engines itself, so a caller no longer has to orchestrate every page or hold a
+# connection open past the gateway ceiling.
+#
+# PUBLICLY ROUTED. nginx.conf has an /api-jobs/ location, the /v1/ rewrite covers
+# it, and netlify.toml proxies /v1/api-jobs/* — so this service IS reachable from
+# the internet at https://…/v1/api-jobs/jobs. Through that path it gets the funnel,
+# the 120 req/min limit, client_max_body_size 200M (kept in step with
+# JOBS_MAX_UPLOAD_MB) and the X-Adapter-Token nginx injects.
+#
+# The published host port 8093 bypasses ALL of that. It is only as protected as
+# ADAPTER_TOKEN makes it, so treat 8093 as LAN-only and keep ADAPTER_TOKEN set.
+#
+# Deploy:  docker compose -f docker-compose.jobs-adapter.yml up -d --build
+# Both networks below are `external`, so the khmer-parser-ui stack AND the surya
+# vLLM stack must already be up or the `up` fails with "network … not found".
+#
+# It calls the ENGINES DIRECTLY (container names for vllm/lens, API_UPSTREAM for
+# cloud) rather than looping back through nginx, so batch work isn't throttled
+# by the public rate limit — which is also why it must send ADAPTER_TOKEN itself.
+# No GPU of its own; needs outbound internet only for the cloud engine.
+
+name: jobs-adapter
+
+services:
+  jobs-adapter:
+    build:
+      context: ./jobs-adapter
+      dockerfile: Dockerfile
+    image: jobs-adapter:latest
+    container_name: jobs-adapter
+    environment:
+      # Must match the token nginx injects (and the other adapters' gate).
+      ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
+      # The cloud engine — same upstream nginx proxies /api/ to.
+      API_UPSTREAM: ${API_UPSTREAM:-https://rinabuoy13--khparser-api.modal.run}
+      # Local engines, by container name on the shared network below.
+      VLLM_ADAPTER_URL: ${VLLM_ADAPTER_URL:-http://vllm-adapter:8090}
+      LENS_ADAPTER_URL: ${LENS_ADAPTER_URL:-http://lens-adapter:8091}
+      # Job state + results, on the named volume so a rebuild keeps them.
+      JOBS_DB: ${JOBS_DB:-/data/jobs.db}
+      JOBS_DIR: ${JOBS_DIR:-/data/results}
+      JOBS_TTL_HOURS: ${JOBS_TTL_HOURS:-72}
+      # Process-wide ceiling on in-flight engine requests across ALL jobs —
+      # per-job concurrency alone doesn't protect the single GPU.
+      JOBS_MAX_INFLIGHT: ${JOBS_MAX_INFLIGHT:-8}
+      JOBS_MAX_ATTEMPTS: ${JOBS_MAX_ATTEMPTS:-3}
+      JOBS_PAGE_TIMEOUT: ${JOBS_PAGE_TIMEOUT:-600}
+      JOBS_MAX_UPLOAD_MB: ${JOBS_MAX_UPLOAD_MB:-200}
+    volumes:
+      - jobs-data:/data
+    ports:
+      - "${JOBS_ADAPTER_PORT:-8093}:8093"
+    networks:
+      - ocrapi_default
+      - surya
+    restart: unless-stopped
+
+volumes:
+  # Survives `up -d --build` and `down` (NOT `down -v`): submitted jobs, their
+  # uploads and their merged results all live here.
+  jobs-data:
+
+networks:
+  # The khmer-parser-ui compose project's default network, so nginx can resolve
+  # `jobs-adapter` by container name — and so this service can resolve
+  # `lens-adapter` the same way. (Project dir is `ocrapi_backup` → network name
+  # `ocrapi_backup_default`; adjust if your compose project name differs.)
+  ocrapi_default:
+    external: true
+    name: ocrapi_backup_default
+  # The vLLM adapter does NOT sit on the network above — it joins the surya
+  # stack's network (see docker-compose.vllm-adapter.yml), which is why the UI
+  # container joins both. We call the engines directly, so we need the same
+  # second hop to resolve `vllm-adapter:8090`. That stack must be up first
+  # (same prerequisite docker-compose.yml already has).
+  # Running without the surya stack? Drop this network and set
+  # VLLM_ADAPTER_URL=http://host.docker.internal:8090 — but be aware Docker
+  # Desktop's host-port relay goes stale on sleep (see nginx.conf's /api-vllm/
+  # comment), which is exactly why container DNS is preferred here.
+  surya:
+    external: true
+    name: surya-container-vllm_default

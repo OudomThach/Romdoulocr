@@ -100,7 +100,9 @@ $composeFiles = @(
     "docker-compose.yml",                 # SPA + nginx (needs the surya network)
     "docker-compose.tidy-adapter.yml",    # transform-to-tidy
     "docker-compose.lens-adapter.yml",    # Google Lens backend
-    "docker-compose.vllm-adapter.yml"     # vLLM adapter (needs the surya network)
+    "docker-compose.vllm-adapter.yml",    # vLLM adapter (needs the surya network)
+    "docker-compose.jobs-adapter.yml",    # async batch jobs
+    "docker-compose.status-adapter.yml"   # aggregate engine status
 )
 foreach ($f in $composeFiles) {
     if (Test-Path $f) {
@@ -125,6 +127,30 @@ if (Test-Path $ts) {
     }
 } else {
     Log "tailscale.exe not found - funnel not checked"
+}
+
+# 4b. Probe the funnel END-TO-END, from the public internet inward. ------------
+# `tailscale funnel status` only proves the local config still lists the port. If
+# Tailscale's ingress breaks, a cert expires, or an ACL changes, every local check
+# above stays green while the public site is dead — the exact blind spot that made
+# earlier outages so confusing. Probe a LOCAL adapter (lens) rather than /api, so a
+# failure isolates the funnel instead of blaming the Modal cloud.
+if (Test-Path $ts) {
+    $publicOk = $false
+    try {
+        $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 `
+             "https://apt-server-desktop.tail806605.ts.net/api-lens/health"
+        $publicOk = ($r.StatusCode -eq 200)
+        Log ("funnel end-to-end: HTTP {0}" -f $r.StatusCode)
+    } catch {
+        Log ("funnel end-to-end FAILED: {0}" -f $_.Exception.Message)
+    }
+    if (-not $publicOk) {
+        # Re-arm ingress. Cheap and idempotent; only runs when the public path is
+        # actually broken, so it will not disturb a healthy funnel.
+        & $ts funnel --bg $FunnelPort 1>$null 2>$null
+        Log "funnel re-armed after failed end-to-end probe"
+    }
 }
 
 # 5. SELF-HEAL the host-port forward, then log per-backend health. ------------
@@ -162,11 +188,13 @@ if (-not (Test-Spa)) {
 # it. "api" is the Modal cloud (can be slow on a cold start; a timeout here is
 # usually just Modal waking, not an outage).
 $checks = [ordered]@{
-    "SPA"  = "http://127.0.0.1:$FunnelPort/"
-    "api"  = "http://127.0.0.1:$FunnelPort/api/health"
-    "tidy" = "http://127.0.0.1:$FunnelPort/api-tidy/health"
-    "vllm" = "http://127.0.0.1:$FunnelPort/api-vllm/health"
-    "lens" = "http://127.0.0.1:$FunnelPort/api-lens/health"
+    "SPA"    = "http://127.0.0.1:$FunnelPort/"
+    "api"    = "http://127.0.0.1:$FunnelPort/api/health"
+    "tidy"   = "http://127.0.0.1:$FunnelPort/api-tidy/health"
+    "vllm"   = "http://127.0.0.1:$FunnelPort/api-vllm/health"
+    "lens"   = "http://127.0.0.1:$FunnelPort/api-lens/health"
+    "jobs"   = "http://127.0.0.1:$FunnelPort/api-jobs/health"
+    "status" = "http://127.0.0.1:$FunnelPort/api-status/health"
 }
 function Invoke-Probe($url, $timeoutSec) {
     try {
@@ -203,6 +231,14 @@ function Repair-Backend($name) {
             docker start surya-vllm 1>$null 2>$null
             docker compose -f docker-compose.vllm-adapter.yml up -d --force-recreate 1>$null 2>$null
             return "started surya-vllm + force-recreated vllm-adapter"
+        }
+        "jobs" {
+            docker compose -f docker-compose.jobs-adapter.yml up -d --force-recreate 1>$null 2>$null
+            return "force-recreated jobs-adapter"
+        }
+        "status" {
+            docker compose -f docker-compose.status-adapter.yml up -d --force-recreate 1>$null 2>$null
+            return "force-recreated status-adapter"
         }
         default { return $null }
     }

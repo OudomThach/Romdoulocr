@@ -49,8 +49,17 @@ $atLogon = New-ScheduledTaskTrigger -AtLogOn
 # warm-up inside the watchdog is separately rate-limited, so a tight cadence
 # does not mean more load on the upstream API.
 $everyN  = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)
-Register-ScheduledTask -TaskName "RomdoulKeepAlive" -Action $action -Trigger $atLogon, $everyN -RunLevel Highest -Force -Description "Keep Romdoul OCR docker + tailscale funnel up" | Out-Null
-Write-Host "[ok] Scheduled task 'RomdoulKeepAlive' registered (runs at logon and every 2 minutes)."
+# Two defaults Windows applies to a new task would silently defeat the watchdog:
+#   DisallowStartIfOnBatteries - TRUE by default, so the watchdog STOPS ENTIRELY on
+#     battery. A UPS reports as battery during a power blip, i.e. it quits exactly
+#     when it is most needed.
+#   StartWhenAvailable - FALSE by default, so a run missed while the machine was
+#     asleep or busy is never caught up.
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+$settings.ExecutionTimeLimit = "PT30M"   # never let a wedged run block the next one
+
+Register-ScheduledTask -TaskName "RomdoulKeepAlive" -Action $action -Trigger $atLogon, $everyN -Settings $settings -RunLevel Highest -Force -Description "Keep Romdoul OCR docker + tailscale funnel up" | Out-Null
+Write-Host "[ok] Scheduled task 'RomdoulKeepAlive' registered (logon + every 2 minutes, battery-safe)."
 
 # 4. Run the watchdog once now. ------------------------------------------------
 Write-Host "[..] Running the watchdog once to bring everything up now."

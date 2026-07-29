@@ -42,9 +42,26 @@
 # browser never learns the upstream URL. force = true so they win over the
 # catch-all below.
 
+# The SPA's default engine goes STRAIGHT to Modal, not through the home PC.
+# This is the only engine that can survive the desktop being asleep, rebooting,
+# or offline — and it was previously routed through the funnel purely by habit,
+# which meant a sleeping PC took down the cloud engine too.
+#
+# Modal sends no CORS headers at all and 405s an OPTIONS preflight, but that is
+# irrelevant here: a Netlify `status = 200` rule is a SERVER-SIDE rewrite, so the
+# browser only ever talks to romdoulocr.netlify.app.
+#
+# What this trades away, honestly: nginx's cached /health (the badge resolves in
+# ~0.9s warm / ~10s cold instead of ~10ms), the courtesy rate limit, and
+# Idempotency-Key replay. Verified that the SPA uses none of them — it reads only
+# `detail` on errors. The ~26s Netlify ceiling is NOT a new cost: it already
+# applied on the funnel path, and going direct removes two hops.
+#
+# Integrators are unaffected — /v1/api/* below still goes through nginx, where the
+# rate limits, structured errors and idempotency guarantees live.
 [[redirects]]
   from = "/api/*"
-  to = "https://apt-server-desktop.tail806605.ts.net/api/:splat"
+  to = "https://rinabuoy13--khparser-api.modal.run/:splat"
   status = 200
   force = true
 
@@ -101,6 +118,21 @@
 [[redirects]]
   from = "/v1/api-tidy/*"
   to = "https://apt-server-desktop.tail806605.ts.net/api-tidy/:splat"
+  status = 200
+  force = true
+
+# Async batch jobs (submit -> poll -> fetch result).
+[[redirects]]
+  from = "/v1/api-jobs/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-jobs/:splat"
+  status = 200
+  force = true
+
+# Aggregate engine status. Without this the SPA fallback answers GET /v1/status
+# with index.html and a 200 — assert on the BODY when testing this route.
+[[redirects]]
+  from = "/v1/status"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-status/status"
   status = 200
   force = true
 

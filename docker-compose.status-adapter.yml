@@ -1,0 +1,80 @@
+# Aggregate status adapter for the Romdoul OCR API.
+#
+# Answers GET /v1/status with every engine's liveness in one call, so an
+# integrator does not have to poll three /health endpoints to pick a backend.
+# nginx routes /api-status/* (and the exact path /v1/status) here by container
+# name over the shared Docker network — same pattern as the vLLM/Lens/tidy
+# adapters.
+#
+# Deploy:  docker compose -f docker-compose.status-adapter.yml up -d --build
+#
+# No GPU and no API key. It DOES need outbound internet, because one of the
+# engines it probes is the cloud (Modal) API. ADAPTER_TOKEN (from the root .env)
+# gates it, same as the others.
+#
+# Start it AFTER the main stack: it probes vllm-adapter and lens-adapter by
+# container name, and reports them down (correctly) until they exist.
+
+name: status-adapter
+
+services:
+  status-adapter:
+    build:
+      context: ./status-adapter
+      dockerfile: Dockerfile
+    image: status-adapter:latest
+    container_name: status-adapter
+    environment:
+      ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
+      # Seconds a fan-out result is reused. Keep this low enough that the answer
+      # is actionable and high enough that polling costs nothing.
+      STATUS_TTL: ${STATUS_TTL:-5}
+      # Read budget for the local sidecars, which answer in single-digit ms.
+      PROBE_TIMEOUT: ${PROBE_TIMEOUT:-4.0}
+      # Read budget for the cloud engine, which scales to zero. 22s matches this
+      # repo's own documented cold-start ceiling (see nginx.conf and API.md);
+      # a shorter value was observed reporting a healthy-but-cold Modal as DOWN.
+      # Safe because CONNECT_TIMEOUT still fails fast on an unreachable host, and
+      # the background refresher absorbs the wait. Keep it under Netlify's ~26s.
+      PROBE_TIMEOUT_CLOUD: ${PROBE_TIMEOUT_CLOUD:-22.0}
+      CONNECT_TIMEOUT: ${CONNECT_TIMEOUT:-2.0}
+      # Background refresh cadence, and how long after the last real request the
+      # refresher keeps running. It idles completely when nobody is polling, so
+      # an unused deployment sends no traffic to the cloud engine at all.
+      REFRESH_INTERVAL: ${REFRESH_INTERVAL:-30}
+      ACTIVE_WINDOW: ${ACTIVE_WINDOW:-300}
+      # How long a recent success excuses a slow probe before we call an engine
+      # down. Covers Modal's ~22s scale-from-zero without hiding a real outage.
+      COLD_GRACE: ${COLD_GRACE:-120}
+      # Probe targets. Defaults match the compose service names + the public
+      # Modal API; override only if a service moves.
+      STATUS_CLOUD_URL: ${STATUS_CLOUD_URL:-https://rinabuoy13--khparser-api.modal.run/health}
+      STATUS_VLLM_URL: ${STATUS_VLLM_URL:-http://vllm-adapter:8090/health}
+      STATUS_LENS_URL: ${STATUS_LENS_URL:-http://lens-adapter:8091/health}
+    ports:
+      - "${STATUS_ADAPTER_PORT:-8094}:8094"
+    # BOTH networks, mirroring khmer-parser-ui — see the note below.
+    networks:
+      - ocrapi_default
+      - surya
+    restart: unless-stopped
+
+networks:
+  # The khmer-parser-ui compose project's default network, so nginx can resolve
+  # `status-adapter` by container name, and so this adapter can resolve
+  # `lens-adapter`. (Project dir is `ocrapi_backup` → network name
+  # `ocrapi_backup_default`; adjust if your compose project name differs.)
+  ocrapi_default:
+    external: true
+    name: ocrapi_backup_default
+
+  # VERIFIED GOTCHA: vllm-adapter is NOT on ocrapi_backup_default — it joins only
+  # the surya stack's network (see docker-compose.vllm-adapter.yml). nginx gets
+  # away with `http://vllm-adapter:8090` because khmer-parser-ui joins BOTH
+  # networks. A status adapter on ocrapi_backup_default alone cannot resolve the
+  # name at all, and reports vLLM permanently down while it is perfectly healthy
+  # — which is exactly the false alarm this endpoint exists to prevent. So join
+  # both, the same way the SPA container does.
+  surya:
+    external: true
+    name: surya-container-vllm_default
