@@ -68,13 +68,15 @@
 
 # Versioned public entry point for third-party integrators (/v1/api/...).
 #
-# These are written out per engine, mapping straight to the UNVERSIONED upstream
-# path, rather than one catch-all `/v1/*` -> `/v1/:splat` rule. A catch-all works
-# for GET but returns 404 on POST: Netlify's redirect engine does not proxy POST
-# through a splat that spans several path segments ("api/ocr-image"), while the
-# single-segment splat below ("ocr-image") — the same shape as the /api/* rules
-# that already carry uploads — proxies POST correctly. Verified against a real
-# multipart upload.
+# Written out per engine, mapping straight to the UNVERSIONED upstream path,
+# because this is the exact rule shape already proven to carry multipart POST
+# uploads (see the /api/* rules above). A single catch-all `/v1/* -> /v1/:splat`
+# may well work too — it has not been tested, because the deploy that would have
+# tested it never reached Netlify. Prefer the known-good shape.
+#
+# NOTE for testing: `GET /v1/anything` returns 200 even when these rules are
+# absent — the SPA fallback at the bottom serves index.html for any GET. Always
+# assert on the response BODY, not the status code, when checking these routes.
 #
 # nginx ALSO understands /v1 natively (it rewrites internally), so callers hitting
 # the funnel host directly can use /v1 too; these rules only fix the Netlify hop.
