@@ -1042,7 +1042,7 @@
           "Khmer Parsing API"
         ],
         "summary": "Translate text",
-        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is whatever you pass in `source_lang` / `target_lang`.",
+        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is whatever you pass in `source_lang` / `target_lang`.\n\n**Cold start — this endpoint is the worst case.** Translation warms separately from OCR, and the first call after an idle period was measured at **42.3 s** (1.1 s once warm). That exceeds the ~26 s ceiling on the public server, which answers with a bare `504` and no JSON body — measured 28.2 s then 200 in 7.9 s on an immediate retry. Either use the direct server for the first call, or treat one `504` as expected and retry.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -1099,7 +1099,7 @@
           "Khmer Parsing API"
         ],
         "summary": "Translate Khmer to English",
-        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is fixed, so only `text` is needed.",
+        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is fixed, so only `text` is needed.\n\n**Cold start — this endpoint is the worst case.** Translation warms separately from OCR, and the first call after an idle period was measured at **42.3 s** (1.1 s once warm). That exceeds the ~26 s ceiling on the public server, which answers with a bare `504` and no JSON body — measured 28.2 s then 200 in 7.9 s on an immediate retry. Either use the direct server for the first call, or treat one `504` as expected and retry.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -1154,7 +1154,7 @@
           "Khmer Parsing API"
         ],
         "summary": "Translate English to Khmer",
-        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is fixed, so only `text` is needed.",
+        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is fixed, so only `text` is needed.\n\n**Cold start — this endpoint is the worst case.** Translation warms separately from OCR, and the first call after an idle period was measured at **42.3 s** (1.1 s once warm). That exceeds the ~26 s ceiling on the public server, which answers with a bare `504` and no JSON body — measured 28.2 s then 200 in 7.9 s on an immediate retry. Either use the direct server for the first call, or treat one `504` as expected and retry.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
