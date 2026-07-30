@@ -43,7 +43,38 @@ export class AbortError extends Error {
  * fail fast with a clear message instead of leaving the UI hanging. */
 const REQUEST_TIMEOUT_MS = 300_000;
 
-async function request<T>(
+/**
+ * Statuses worth one more try, and why this exists at all.
+ *
+ * The cloud engine scales to zero, so the FIRST call after a quiet spell pays a
+ * ~22s cold start — and the hosted path cuts a request off at ~26s, so a cold
+ * call lands close enough to that ceiling to lose the race and come back 504.
+ * The user saw "Request failed with status 504" and a dead end, even though the
+ * failed attempt had just WARMED the engine: a retry a moment later succeeds in
+ * a couple of seconds. Retrying turns a hard failure into a short delay.
+ *
+ * Deliberately narrow — 4xx is the caller's fault and would fail identically,
+ * and a burnt retry on 429 only spends more of the rate-limit budget.
+ */
+const RETRY_STATUSES = new Set([502, 503, 504]);
+const RETRY_ATTEMPTS = 2;      // 3 tries total
+const RETRY_BASE_MS = 1200;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** True when another attempt is worth making. A user-cancelled request never is. */
+function shouldRetry(e: unknown, attempt: number, signal?: AbortSignal): boolean {
+  if (attempt >= RETRY_ATTEMPTS || signal?.aborted) return false;
+  if (e instanceof AbortError) return false;
+  if (e instanceof ApiError) {
+    // status 0 is a transport failure (dropped connection / client timeout) —
+    // exactly what a request killed at the gateway ceiling looks like.
+    return e.status === 0 || RETRY_STATUSES.has(e.status);
+  }
+  return false;
+}
+
+async function requestOnce<T>(
   path: string,
   init: RequestInit,
   signal?: AbortSignal,
@@ -103,6 +134,45 @@ export interface UploadOptions {
 function withBackendParams(qs: URLSearchParams, backend?: BackendId): URLSearchParams {
   if ((backend ?? getBackend()) === 'vllm') qs.set('dpi', String(getRenderDpi()));
   return qs;
+}
+
+/** Retrying wrapper — see RETRY_STATUSES for why this exists. */
+async function request<T>(
+  path: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+  backend?: BackendId,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await requestOnce<T>(path, init, signal, backend);
+    } catch (e) {
+      if (!shouldRetry(e, attempt, signal)) throw e;
+      await sleep(RETRY_BASE_MS * 2 ** attempt);
+    }
+  }
+}
+
+/**
+ * Retrying wrapper for uploads. The body is a FormData built from a File, which
+ * is re-readable, so re-sending it is safe — and cheap relative to losing the
+ * whole page to a cold-start 504. onProgress is reset to 0 on a fresh attempt so
+ * the bar cannot appear to run backwards.
+ */
+async function uploadWithProgress<T>(
+  path: string,
+  body: FormData,
+  opts: UploadOptions & { rawFallback?: boolean } = {},
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await uploadOnce<T>(path, body, opts);
+    } catch (e) {
+      if (!shouldRetry(e, attempt, opts.signal)) throw e;
+      await sleep(RETRY_BASE_MS * 2 ** attempt);
+      opts.onProgress?.(0);
+    }
+  }
 }
 
 export const api = {
@@ -197,13 +267,13 @@ export const api = {
  * because fetch doesn't expose upload-progress events and its AbortController
  * can only abort before the body starts streaming reliably.
  */
-function uploadWithProgress<T>(
+function uploadOnce<T>(
   path: string,
   body: FormData,
   { onProgress, signal, rawFallback, backend }: UploadOptions & { rawFallback?: boolean } = {},
 ): Promise<T> {
   if (!onProgress && !signal) {
-    return request<T>(path, { method: 'POST', body }, undefined, backend);
+    return requestOnce<T>(path, { method: 'POST', body }, undefined, backend);
   }
 
   return new Promise<T>((resolve, reject) => {

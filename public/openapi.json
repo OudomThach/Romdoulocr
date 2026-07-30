@@ -1035,6 +1035,173 @@
           }
         }
       }
+    },
+    "/api/translate": {
+      "post": {
+        "tags": [
+          "Khmer Parsing API"
+        ],
+        "summary": "Translate text",
+        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is whatever you pass in `source_lang` / `target_lang`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranslateRequest"
+              },
+              "example": {
+                "text": "ព្រះរាជាណាចក្រកម្ពុជា",
+                "source_lang": "km",
+                "target_lang": "en"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Translated text",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing or invalid `text`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
+    "/api/translate/km-to-en": {
+      "post": {
+        "tags": [
+          "Khmer Parsing API"
+        ],
+        "summary": "Translate Khmer to English",
+        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is fixed, so only `text` is needed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranslateRequest"
+              },
+              "example": {
+                "text": "សូមអរគុណច្រើន"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Translated text",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing or invalid `text`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
+    "/api/translate/en-to-km": {
+      "post": {
+        "tags": [
+          "Khmer Parsing API"
+        ],
+        "summary": "Translate English to Khmer",
+        "description": "Translates TEXT — it does no OCR. Useful for translating text you already extracted without paying for a second OCR pass.\n\nTakes **JSON, not multipart**. Send Khmer as UTF-8; a mis-encoded body comes back as `?????` in `source_text`, which is the quickest way to spot the problem.\n\nCloud engine only — the self-hosted engines do not implement it.\n\nDirection is fixed, so only `text` is needed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranslateRequest"
+              },
+              "example": {
+                "text": "Kingdom of Cambodia"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Translated text",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing or invalid `text`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1766,6 +1933,50 @@
           "started_at": "2026-07-29T14:02:11Z",
           "finished_at": null,
           "error": null
+        }
+      },
+      "TranslateRequest": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to translate. Khmer must be sent as UTF-8."
+          },
+          "source_lang": {
+            "type": "string",
+            "example": "km",
+            "description": "Optional on the directional endpoints, which set it themselves."
+          },
+          "target_lang": {
+            "type": "string",
+            "example": "en"
+          }
+        }
+      },
+      "TranslateResponse": {
+        "type": "object",
+        "properties": {
+          "source_text": {
+            "type": "string"
+          },
+          "source_lang": {
+            "type": "string"
+          },
+          "target_lang": {
+            "type": "string"
+          },
+          "translated_text": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "source_text": "ព្រះរាជាណាចក្រកម្ពុជា",
+          "source_lang": "km",
+          "target_lang": "en",
+          "translated_text": "Kingdom of Cambodia"
         }
       }
     }
