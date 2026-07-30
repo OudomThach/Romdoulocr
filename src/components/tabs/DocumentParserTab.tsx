@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useKeyboardShortcuts } from '@/components/controls';
+import { VerificationNotice } from '@/components/VerificationNotice';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { FileDropzone } from '@/components/FileDropzone';
 import { FileReadyPanel } from '@/components/FileReadyPanel';
@@ -678,6 +679,12 @@ function ExtractionResultsCard({
           </div>
         )}
       </header>
+      {result && (
+        <div className="mt-4">
+          <VerificationNotice />
+        </div>
+      )}
+
 
       <div
         role="tablist"

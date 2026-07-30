@@ -40,9 +40,9 @@ const STRINGS: Record<string, { en: string; km: string }> = {
   // ── OCR Image tab ───────────────────────────────────────────────────────
   'ocr.title': { en: 'Scan an image', km: 'ស្កេនរូបភាព' },
   'ocr.subtitle': { en: 'Drop one image — OCR starts instantly.', km: 'រូបភាពមួយសន្លឹក — OCR ដំណើរការភ្លាមៗ' },
-  'ocr.drop.title': { en: 'Drop an image here', km: 'ទម្លាក់រូបភាពនៅទីនេះ' },
+  'ocr.drop.title': { en: 'Drop an image or PDF here', km: 'ទម្លាក់រូបភាព ឬ PDF នៅទីនេះ' },
   'ocr.drop.hint': { en: 'tap to choose · paste anywhere', km: 'ចុចដើម្បីជ្រើសរើស · paste ក៏បាន' },
-  'ocr.drop.accepted': { en: 'PNG · JPG · WEBP · BMP · TIFF', km: 'PNG · JPG · WEBP · BMP · TIFF' },
+  'ocr.drop.accepted': { en: 'PDF · PNG · JPG · WEBP · BMP · TIFF', km: 'PDF · PNG · JPG · WEBP · BMP · TIFF' },
   'ocr.takePhoto': { en: 'Take photo', km: 'ថតរូប' },
   'ocr.preparing': { en: 'Preparing image…', km: 'កំពុងរៀបចំរូបភាព…' },
   'ocr.uploading': { en: 'Uploading…', km: 'កំពុងផ្ទុកឡើង…' },

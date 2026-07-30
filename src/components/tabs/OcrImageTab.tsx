@@ -7,13 +7,14 @@ import { ProgressBar } from '@/components/ProgressBar';
 import { SettingToggle } from '@/components/ExtractionSettingsCard';
 import { useBatchProcessor } from '@/hooks/useBatchProcessor';
 import { useHistoryAutoSave } from '@/hooks/useHistoryAutoSave';
-import { imageFileToThumbnail } from '@/lib/pdfProcessing';
+import { getPdfPageCount, imageFileToThumbnail, renderPdfPages } from '@/lib/pdfProcessing';
 import { api } from '@/lib/api';
 import { copyToClipboard, isPdf } from '@/lib/utils';
 import { ResultsToolbar } from '@/components/ResultsToolbar';
+import { VerificationNotice } from '@/components/VerificationNotice';
 import { processImage } from '@/lib/imageProcessing';
 import { useSettingsStore } from '@/hooks/useSettingsStore';
-import { minimalPreprocessOpts } from '@/lib/extractionConfig';
+import { minimalPreprocessOpts, rasterFor } from '@/lib/extractionConfig';
 import { useLocale } from '@/lib/i18n';
 import type { DocumentResult, OcrImageResponse } from '@/types/api';
 
@@ -24,10 +25,13 @@ interface PreparedFile {
 }
 
 /**
- * OCR Image — mobile-first "scanner" flow:
- * ONE image (no PDFs, no multi-file), OCR starts AUTOMATICALLY the moment an
- * image is dropped / picked / photographed / pasted. No run button.
- * The other tabs keep the full multi-file workflow.
+ * OCR Image — mobile-first "scanner" flow: ONE upload, and OCR starts
+ * AUTOMATICALLY the moment it is dropped / picked / photographed / pasted. No
+ * run button. The other tabs keep the full multi-file workflow.
+ *
+ * A PDF is accepted too — it is rasterized locally and every page is enqueued as
+ * its own request, with the page texts joined for display. Refusing PDFs here
+ * just looked like the tab was broken, since every other tab takes them.
  */
 export function OcrImageTab() {
   const [files, setFiles] = useState<File[]>([]);
@@ -116,7 +120,7 @@ export function OcrImageTab() {
   const lastRunKey = useRef<string | null>(null);
   useEffect(() => {
     const f = files[0];
-    if (!f || isPdf(f.name)) return;
+    if (!f) return;
     const key = fileKey(f);
     if (lastRunKey.current === key) return;
     lastRunKey.current = key;
@@ -126,6 +130,28 @@ export function OcrImageTab() {
       setLocalError(null);
       setPreparingMsg(t('ocr.preparing'));
       try {
+        if (isPdf(f.name)) {
+          // A PDF used to be silently ignored here, which read as the tab being
+          // broken. /ocr-image only speaks images, so rasterize every page and
+          // enqueue them — one request per page, the same shape the rest of the
+          // app uses, so a slow page never blocks the others and one bad page
+          // doesn't sink the scan. The texts are joined for display below.
+          const pageCount = await getPdfPageCount(f);
+          if (cancelled) return;
+          setPreparingMsg(t('ocr.preparing'));
+          const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
+          const rendered = await renderPdfPages(f, pages, rasterFor(extraction.highRes).dpi);
+          if (cancelled) return;
+          setProgress(0);
+          batch.enqueueMany(
+            rendered.map((r, i) => ({
+              fileKey: rendered.length > 1 ? `${key}-p${i + 1}` : key,
+              file: r.file,
+              useCtc,
+            })),
+          );
+          return;
+        }
         // Minimal preprocessing: resolution normalization + JPEG encode ONLY —
         // no grayscale/contrast/deskew/etc. silently editing the user's image.
         const processed = await processImage(f, minimalPreprocessOpts(extraction.highRes));
@@ -133,7 +159,11 @@ export function OcrImageTab() {
         setProgress(0);
         batch.enqueueMany([{ fileKey: key, file: processed, useCtc }]);
       } catch (e) {
-        if (!cancelled) setLocalError(e instanceof Error ? e.message : 'Image preprocessing failed');
+        if (!cancelled) {
+          setLocalError(
+            e instanceof Error ? e.message : isPdf(f.name) ? 'PDF rasterization failed' : 'Image preprocessing failed',
+          );
+        }
       } finally {
         if (!cancelled) setPreparingMsg(null);
       }
@@ -162,7 +192,19 @@ export function OcrImageTab() {
 
   const currentResultItem = batch.items.find((it) => it.status === 'done' && it.result) ?? null;
   const currentResult = currentResultItem?.result ?? null;
-  const cleanText = currentResult?.text ?? '';
+  // A rasterized PDF enqueues one item per page, so the text of the FIRST result
+  // is only the first page — taking it alone would silently drop the rest of the
+  // document from copy, export and the preview. Join every finished page in
+  // enqueue order (which is page order).
+  const cleanText = useMemo(() => {
+    const texts = batch.items
+      .filter((it) => it.status === 'done' && it.result)
+      .map((it) => (it.result as OcrImageResponse).text ?? '');
+    if (texts.length <= 1) return texts[0] ?? '';
+    return texts
+      .map((txt, i) => (txt.trim() ? `--- page ${i + 1} ---\n${txt}` : `--- page ${i + 1} ---`))
+      .join('\n\n');
+  }, [batch.items]);
   const busy = batch.isRunning || preparingMsg !== null;
 
   // The user's ORIGINAL upload (or their crop) — shown while running AND in
@@ -199,7 +241,7 @@ export function OcrImageTab() {
 
           <div className="mt-5">
             <FileDropzone
-              accept="image-only"
+              accept="pdf-or-image"
               files={files}
               onChange={setFiles}
               disabled={busy}
@@ -289,6 +331,10 @@ export function OcrImageTab() {
               )}
             </div>
           </header>
+
+          <div className="mt-4">
+            <VerificationNotice />
+          </div>
 
           {/* Action row — thumb-sized, copy is the hero action. */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
