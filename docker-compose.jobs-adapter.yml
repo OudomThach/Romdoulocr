@@ -5,6 +5,11 @@
 # engines itself, so a caller no longer has to orchestrate every page or hold a
 # connection open past the gateway ceiling.
 #
+# GET /metrics is the operational view (queue depth, per-engine failures and
+# retries, latency percentiles) and is cheap enough to poll. The result endpoint
+# also serves format=jsonl / format=csv, flattened one row per region and
+# streamed, plus partial=true for a job that is still running.
+#
 # PUBLICLY ROUTED. nginx.conf has an /api-jobs/ location, the /v1/ rewrite covers
 # it, and netlify.toml proxies /v1/api-jobs/* — so this service IS reachable from
 # the internet at https://…/v1/api-jobs/jobs. Through that path it gets the funnel,
@@ -52,35 +57,82 @@ services:
       dockerfile: Dockerfile
     image: jobs-adapter:latest
     container_name: jobs-adapter
+    # LIST form, not the mapping form, and that is load-bearing for exactly one
+    # entry: `- JOBS_MAX_INFLIGHT` with no `=` is injected ONLY when the variable
+    # is actually set (in .env or the shell). The mapping form always produces a
+    # key, so `JOBS_MAX_INFLIGHT: ${JOBS_MAX_INFLIGHT:-}` handed the container an
+    # EMPTY STRING — which the image that predates the per-engine split parses
+    # with int(""). That is not hypothetical: it crash-looped the live container
+    # (exit 1 at import, 11 restarts) the moment ops/keepalive.ps1 recreated it
+    # against this file while the old image was still deployed. A compose file
+    # must be startable by the image currently on the host, not only by the one
+    # about to be built.
     environment:
       # Must match the token nginx injects (and the other adapters' gate).
-      ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
+      - ADAPTER_TOKEN=${ADAPTER_TOKEN:-}
       # The cloud engine — same upstream nginx proxies /api/ to.
-      API_UPSTREAM: ${API_UPSTREAM:-https://rinabuoy13--khparser-api.modal.run}
+      - API_UPSTREAM=${API_UPSTREAM:-https://rinabuoy13--khparser-api.modal.run}
       # Local engines, by container name on the shared network below.
-      VLLM_ADAPTER_URL: ${VLLM_ADAPTER_URL:-http://vllm-adapter:8090}
-      LENS_ADAPTER_URL: ${LENS_ADAPTER_URL:-http://lens-adapter:8091}
+      - VLLM_ADAPTER_URL=${VLLM_ADAPTER_URL:-http://vllm-adapter:8090}
+      - LENS_ADAPTER_URL=${LENS_ADAPTER_URL:-http://lens-adapter:8091}
       # Job state + results, on the named volume so a rebuild keeps them.
-      JOBS_DB: ${JOBS_DB:-/data/jobs.db}
-      JOBS_DIR: ${JOBS_DIR:-/data/results}
-      JOBS_TTL_HOURS: ${JOBS_TTL_HOURS:-72}
-      # Process-wide ceiling on in-flight engine requests across ALL jobs —
-      # per-job concurrency alone doesn't protect the single GPU.
-      JOBS_MAX_INFLIGHT: ${JOBS_MAX_INFLIGHT:-8}
-      JOBS_MAX_ATTEMPTS: ${JOBS_MAX_ATTEMPTS:-3}
-      JOBS_PAGE_TIMEOUT: ${JOBS_PAGE_TIMEOUT:-600}
-      JOBS_MAX_UPLOAD_MB: ${JOBS_MAX_UPLOAD_MB:-200}
-      # Concurrent pypdf splits. The split is the only phase MAX_INFLIGHT does
-      # not cover and it peaks at ~2.5x the source file, so it gets its own
+      - JOBS_DB=${JOBS_DB:-/data/jobs.db}
+      - JOBS_DIR=${JOBS_DIR:-/data/results}
+      - JOBS_TTL_HOURS=${JOBS_TTL_HOURS:-72}
+      # In-flight engine requests PER ENGINE, across all jobs. Per-job
+      # concurrency alone doesn't protect the single GPU, and one shared number
+      # for all three engines (what this used to be) was wrong twice over: a big
+      # cloud batch and a vLLM batch competed for the same slots even though they
+      # share no hardware, so either could starve the other.
+      #
+      # Modal is elastic, so 8 is a courtesy ceiling on our own fan-out rather
+      # than a limit of the engine — measured p50 8.2s / p90 27.7s, and going
+      # wider mostly buys more cold starts (~22s each).
+      - JOBS_MAX_INFLIGHT_CLOUD=${JOBS_MAX_INFLIGHT_CLOUD:-8}
+      # EXACTLY the GPU's `--max-num-seqs 6` (see docker-compose.vllm-adapter.yml
+      # / the surya vLLM stack). Anything past 6 is not parallelism, it is a
+      # queue inside vLLM that this service cannot see, so it inflates every
+      # latency we measure and speeds nothing up.
+      - JOBS_MAX_INFLIGHT_VLLM=${JOBS_MAX_INFLIGHT_VLLM:-6}
+      # Lens is an unofficial Google endpoint. 3 is "be gentle", not a capacity
+      # measurement — there is no published one, and getting blocked costs the
+      # engine entirely.
+      - JOBS_MAX_INFLIGHT_LENS=${JOBS_MAX_INFLIGHT_LENS:-3}
+      # Global backstop across ALL engines, bounding total fan-out (sockets, and
+      # the RAM of every in-flight payload against the 2g limit below).
+      #
+      # NO DEFAULT, and no `=` — see the note above the block. Unset, the service
+      # uses the SUM of the three limits above (8+6+3=17), which makes the
+      # per-engine caps the operative ones; that is the intended configuration.
+      # Set it (in .env) only to impose a hard ceiling BELOW them. A deployment
+      # that already carries JOBS_MAX_INFLIGHT=8 in its .env keeps that 8 —
+      # silently promoting it to 17 because these variables were introduced would
+      # be a capacity change nobody asked for. An image that predates the split
+      # ignores the three above and falls back to its own default of 8, which is
+      # exactly what it did before this file changed.
+      - JOBS_MAX_INFLIGHT
+      - JOBS_MAX_ATTEMPTS=${JOBS_MAX_ATTEMPTS:-3}
+      - JOBS_PAGE_TIMEOUT=${JOBS_PAGE_TIMEOUT:-600}
+      - JOBS_MAX_UPLOAD_MB=${JOBS_MAX_UPLOAD_MB:-200}
+      # Concurrent pypdf splits. The split is the only phase the in-flight caps
+      # do not cover and it peaks at ~2.5x the source file, so it gets its own
       # (small) gate. Raising this is the fastest way to OOM the 2g limit below.
-      JOBS_MAX_SPLITS: ${JOBS_MAX_SPLITS:-2}
+      - JOBS_MAX_SPLITS=${JOBS_MAX_SPLITS:-2}
       # Queued+running ceiling; past it POST /jobs sheds load with 429 +
       # Retry-After. Idempotency-Key replays of existing jobs still succeed.
-      JOBS_MAX_ACTIVE: ${JOBS_MAX_ACTIVE:-50}
+      - JOBS_MAX_ACTIVE=${JOBS_MAX_ACTIVE:-50}
       # How many restarts one job may be resumed across before it is failed for
       # real. This is what stops a job that kills the process from looping
       # forever against `restart: unless-stopped`.
-      JOBS_MAX_RESUMES: ${JOBS_MAX_RESUMES:-3}
+      - JOBS_MAX_RESUMES=${JOBS_MAX_RESUMES:-3}
+      # GET /metrics keeps this many engine-latency samples per engine in a ring
+      # buffer. Bounded because this container runs for days: an unbounded list
+      # is a leak that only appears under the workload it was added for.
+      - JOBS_METRICS_SAMPLES=${JOBS_METRICS_SAMPLES:-2000}
+      # How long /metrics may reuse its SQLite job-count aggregate. It exists to
+      # be polled by several dashboards at once; without this, every poll walks
+      # 72h of rows for numbers that move in minutes.
+      - JOBS_METRICS_CACHE=${JOBS_METRICS_CACHE:-2}
     volumes:
       - jobs-data:/data
     ports:
