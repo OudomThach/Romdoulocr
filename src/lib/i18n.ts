@@ -103,6 +103,15 @@ const STRINGS: Record<string, { en: string; km: string }> = {
     en: "Accounts aren't ready yet — continue as guest for now.",
     km: 'គណនីមិនទាន់ដំណើរការទេ — សូមបន្តជាភ្ញៀវសិន',
   },
+  'landing.registered': { en: 'Registered user', km: 'អ្នកប្រើប្រាស់បានចុះឈ្មោះ' },
+  'landing.registered.hint': { en: 'Sign in to edit records & access extraction data', km: 'ចូលដើម្បីកែប្រែទិន្នន័យ និងមើលទិន្នន័យស្រង់' },
+  'landing.signin': { en: 'Sign in', km: 'ចូល' },
+  'landing.username': { en: 'Username', km: 'ឈ្មោះអ្នកប្រើ' },
+  'landing.password': { en: 'Password', km: 'ពាក្យសម្ងាត់' },
+  'landing.signingIn': { en: 'Signing in…', km: 'កំពុងចូល…' },
+  'landing.invalid': { en: 'Invalid username or password', km: 'ឈ្មោះ ឬពាក្យសម្ងាត់មិនត្រឹមត្រូវ' },
+  'landing.back': { en: '← Back', km: '← ត្រឡប់' },
+  'landing.signedIn': { en: 'Signed in as', km: 'បានចូលជា' },
 
   // ── Settings ────────────────────────────────────────────────────────────
   'settings.title': { en: 'Settings', km: 'ការកំណត់' },

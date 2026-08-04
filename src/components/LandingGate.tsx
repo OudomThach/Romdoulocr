@@ -1,18 +1,53 @@
+import { useState } from 'react';
 import { RomdoulLogo } from '@/components/RomdoulLogo';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { toast } from '@/hooks/useToastStore';
 import { useLocale } from '@/lib/i18n';
+import { metaClient, metaSession, notifyAuthChanged } from '@/lib/metaClient';
 
 /**
  * Guest gate — the branded welcome screen shown before entering the app.
- * Only "Continue as guest" is live (and deliberately FIRST, per product
- * choice); Google / email / create-account are visible but marked coming
- * soon (no auth backend yet) and just toast an explanation.
+ * Two paths:
+ *   - Public user: "Continue as guest" (no account, OCR only)
+ *   - Registered user: sign in with a metadata-service account — unlocks
+ *     record editing, the Metadata tab and the portal session (shared key).
+ * Google / email / create-account stay visible but marked coming soon.
+ */
+
+/**
+ * Guest gate — the branded welcome screen shown before entering the app.
+ * Two paths:
+ *   - Public user: "Continue as guest" (no account, OCR only)
+ *   - Registered user: sign in with a metadata-service account — unlocks
+ *     record editing, the Metadata tab and the portal session (shared key).
+ * Google / email / create-account stay visible but marked coming soon.
  */
 export function LandingGate({ onEnter }: { onEnter: () => void }) {
   const { t } = useLocale();
+  const [showLogin, setShowLogin] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const soon = () => toast.info(t('landing.soonToast'));
+
+  const submitLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await metaClient.login(username.trim(), password);
+      metaSession.save(res.token, res.user);
+      notifyAuthChanged();
+      toast.success(`${t('landing.signedIn')} ${res.user.username}`);
+      onEnter();
+    } catch {
+      setError(t('landing.invalid'));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const soonBadge = (
     <span className="badge absolute -top-2 right-3 border-accent2/40 bg-white text-[10px] text-accent2">
@@ -52,35 +87,86 @@ export function LandingGate({ onEnter }: { onEnter: () => void }) {
 
         <div className="temple-ridge mx-auto my-6 w-40" />
 
-        {/* Auth options — guest FIRST and primary. */}
-        <div className="grid gap-3">
-          <button type="button" onClick={onEnter} className="btn-primary min-h-12 w-full text-base">
-            {t('landing.guest')}
-          </button>
+        {!showLogin ? (
+          <>
+            {/* Auth options — guest FIRST and primary. */}
+            <div className="grid gap-3">
+              <button type="button" onClick={onEnter} className="btn-primary min-h-12 w-full text-base">
+                {t('landing.guest')}
+              </button>
 
-          <div className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-slate-400">
-            <span className="h-px flex-1 bg-slate-200" />
-            {t('landing.or')}
-            <span className="h-px flex-1 bg-slate-200" />
-          </div>
+              <div className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-slate-400">
+                <span className="h-px flex-1 bg-slate-200" />
+                {t('landing.or')}
+                <span className="h-px flex-1 bg-slate-200" />
+              </div>
 
-          <button type="button" onClick={soon} className="btn-secondary relative min-h-12 w-full">
-            {soonBadge}
-            <GoogleIcon className="h-4 w-4" />
-            {t('landing.google')}
-          </button>
-          <button type="button" onClick={soon} className="btn-secondary relative min-h-12 w-full">
-            {soonBadge}
-            <MailIcon className="h-4 w-4" />
-            {t('landing.email')}
-          </button>
-          <button type="button" onClick={soon} className="btn-ghost relative min-h-11 w-full">
-            {soonBadge}
-            {t('landing.create')}
-          </button>
-        </div>
+              <button type="button" onClick={() => setShowLogin(true)} className="btn-secondary relative min-h-12 w-full">
+                <UserIcon className="h-4 w-4" />
+                {t('landing.registered')}
+              </button>
+              <p className="-mt-1 text-[11px] text-slate-500">{t('landing.registered.hint')}</p>
+
+              <div className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-slate-400">
+                <span className="h-px flex-1 bg-slate-200" />
+                {t('landing.or')}
+                <span className="h-px flex-1 bg-slate-200" />
+              </div>
+
+              <button type="button" onClick={soon} className="btn-secondary relative min-h-12 w-full">
+                {soonBadge}
+                <GoogleIcon className="h-4 w-4" />
+                {t('landing.google')}
+              </button>
+              <button type="button" onClick={soon} className="btn-secondary relative min-h-12 w-full">
+                {soonBadge}
+                <MailIcon className="h-4 w-4" />
+                {t('landing.email')}
+              </button>
+              <button type="button" onClick={soon} className="btn-ghost relative min-h-11 w-full">
+                {soonBadge}
+                {t('landing.create')}
+              </button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={submitLogin} className="grid gap-3">
+            <button type="button" onClick={() => setShowLogin(false)} className="btn-ghost justify-self-start px-2 py-1 text-xs">
+              {t('landing.back')}
+            </button>
+            <input
+              className="input"
+              placeholder={t('landing.username')}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoFocus
+              autoComplete="username"
+            />
+            <input
+              className="input"
+              type="password"
+              placeholder={t('landing.password')}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+            {error && <p className="text-sm text-red-500">{error}</p>}
+            <button type="submit" className="btn-primary min-h-12 w-full text-base" disabled={busy || !username || !password}>
+              {busy ? t('landing.signingIn') : t('landing.signin')}
+            </button>
+          </form>
+        )}
       </section>
     </div>
+  );
+}
+
+function UserIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c0-4 3.6-6 8-6s8 2 8 6" strokeLinecap="round" />
+    </svg>
   );
 }
 
