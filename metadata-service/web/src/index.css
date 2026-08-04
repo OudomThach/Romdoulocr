@@ -1,0 +1,274 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================================================== *
+ * Romdoul OCR design tokens — mirrored so the portal looks like part of the
+ * app: cyberpunk neon (cyan #00e5ff + magenta #ff2fb9), glass panels, .dark
+ * class theming. Theme key shared with the OCR app (khmer-parser-theme).
+ * ========================================================================== */
+:root {
+  --c-white: 255 255 255;
+  --c-slate-50: 248 250 252;
+  --c-slate-100: 241 245 249;
+  --c-slate-200: 226 232 240;
+  --c-slate-300: 203 213 225;
+  --c-slate-400: 148 163 184;
+  --c-slate-500: 100 116 139;
+  --c-slate-600: 71 85 105;
+  --c-slate-700: 51 65 85;
+  --c-slate-800: 30 41 59;
+  --c-slate-900: 15 23 42;
+  --c-slate-950: 2 6 23;
+
+  --c-ink-50: 20 22 31;
+  --c-ink-100: 31 35 48;
+  --c-ink-200: 58 64 81;
+  --c-ink-300: 67 75 96;
+  --c-ink-400: 82 92 117;
+  --c-ink-500: 103 115 141;
+  --c-ink-600: 133 144 168;
+  --c-ink-700: 177 185 201;
+  --c-ink-800: 214 218 227;
+  --c-ink-900: 236 238 242;
+  --c-ink-950: 246 247 249;
+
+  --c-accent: 8 145 178;
+  --c-accent-hover: 14 116 144;
+  --c-accent-2: 219 39 119;
+}
+
+.dark {
+  --c-white: 20 24 34;
+  --c-slate-50: 30 36 50;
+  --c-slate-100: 38 45 62;
+  --c-slate-200: 51 60 80;
+  --c-slate-300: 71 82 106;
+  --c-slate-400: 128 140 167;
+  --c-slate-500: 156 169 196;
+  --c-slate-600: 186 196 219;
+  --c-slate-700: 203 213 231;
+  --c-slate-800: 226 232 240;
+  --c-slate-900: 241 245 249;
+  --c-slate-950: 248 250 252;
+
+  --c-ink-50: 246 247 249;
+  --c-ink-100: 236 238 242;
+  --c-ink-200: 214 218 227;
+  --c-ink-300: 177 185 201;
+  --c-ink-400: 133 144 168;
+  --c-ink-500: 103 115 141;
+  --c-ink-600: 82 92 117;
+  --c-ink-700: 67 75 96;
+  --c-ink-800: 58 64 81;
+  --c-ink-900: 31 35 48;
+  --c-ink-950: 20 22 31;
+
+  --c-accent: 0 229 255;
+  --c-accent-hover: 34 211 238;
+  --c-accent-2: 255 47 185;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background:
+      radial-gradient(460px 460px at 86% 8%, rgb(255 47 185 / 0.12), transparent 70%),
+      radial-gradient(400px 400px at 4% 60%, rgb(0 229 255 / 0.14), transparent 70%),
+      radial-gradient(900px 480px at 12% -10%, rgb(0 229 255 / 0.10), transparent 60%),
+      radial-gradient(800px 420px at 100% 0%, rgb(255 47 185 / 0.08), transparent 55%),
+      linear-gradient(180deg, #eef2fb 0%, #e7ecf7 100%);
+    background-attachment: fixed;
+    color: #0a0f1e;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
+  }
+  .dark body {
+    background:
+      radial-gradient(60vw 50vh at 82% -5%, rgb(255 47 185 / 0.20), transparent 60%),
+      radial-gradient(55vw 45vh at 4% 8%, rgb(0 229 255 / 0.16), transparent 60%),
+      radial-gradient(40vw 40vh at 50% 120%, rgb(124 92 255 / 0.18), transparent 60%),
+      #05060b;
+    background-attachment: fixed;
+    color: #e6ebff;
+  }
+
+  .cyber-grid {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgb(var(--c-accent) / 0.14) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--c-accent) / 0.14) 1px, transparent 1px);
+    background-size: 46px 46px;
+    -webkit-mask-image: radial-gradient(circle at 50% 38%, #000 0%, transparent 78%);
+    mask-image: radial-gradient(circle at 50% 38%, #000 0%, transparent 78%);
+    animation: grid-pan 9s linear infinite;
+    opacity: 0.5;
+  }
+  html:not(.dark) .cyber-grid {
+    opacity: 0.28;
+  }
+  @keyframes grid-pan {
+    to {
+      background-position: 0 46px, 46px 0;
+    }
+  }
+  .cyber-scan {
+    position: fixed;
+    inset-inline: 0;
+    top: 0;
+    height: 42%;
+    z-index: 1;
+    pointer-events: none;
+    background: linear-gradient(180deg, transparent, rgb(var(--c-accent) / 0.08) 50%, transparent);
+    mix-blend-mode: screen;
+    opacity: 0.4;
+    animation: scan-sweep 7s linear infinite;
+  }
+  @keyframes scan-sweep {
+    0% {
+      transform: translateY(-120%);
+    }
+    100% {
+      transform: translateY(320%);
+    }
+  }
+
+  :root {
+    accent-color: rgb(var(--c-accent));
+  }
+  .dark {
+    accent-color: rgb(0 229 255);
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.015em;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent) / 0.55);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-[20px] border border-slate-200 bg-white shadow-sm;
+  }
+  .panel {
+    @apply rounded-[20px] border border-slate-200 bg-white shadow-sm;
+  }
+  .panel-raised {
+    @apply rounded-[22px] border border-slate-200 bg-white;
+  }
+  .panel-sunken {
+    @apply rounded-2xl border border-slate-200 bg-slate-50;
+  }
+  .display {
+    @apply text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
+           transition-all duration-150 active:scale-[0.98]
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-1 focus-visible:ring-offset-white
+           disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn rounded-full px-5 font-semibold text-slate-950 shadow-sm;
+    background: linear-gradient(135deg, #00e5ff, #ff2fb9);
+    background-size: 200% 100%;
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.35) inset, 0 8px 24px -8px rgb(255 47 185 / 0.55);
+    animation: btn-shine 3.5s linear infinite;
+  }
+  @keyframes btn-shine {
+    to {
+      background-position: 200% 0;
+    }
+  }
+  .btn-primary:hover {
+    filter: brightness(1.08);
+  }
+  .btn-secondary {
+    @apply btn border border-slate-200 bg-white text-slate-950 shadow-sm hover:bg-slate-50 hover:border-slate-300;
+  }
+  .btn-ghost {
+    @apply btn text-slate-600 hover:bg-slate-100 hover:text-slate-950;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950
+           placeholder:text-slate-400 transition-colors
+           focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600;
+  }
+
+  .nav-item {
+    @apply relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
+           text-slate-500 transition-all duration-150
+           hover:bg-slate-100 hover:text-slate-950;
+  }
+  .nav-item-active {
+    @apply bg-slate-100 text-slate-950;
+  }
+
+  .th {
+    @apply px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap;
+  }
+  .td {
+    @apply px-3 py-2.5 text-sm whitespace-nowrap;
+  }
+
+  .rise-in {
+    animation: rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+html:not(.dark) .card,
+html:not(.dark) .panel,
+html:not(.dark) .panel-raised {
+  background: rgb(255 255 255 / 0.86);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  backdrop-filter: blur(10px) saturate(1.05);
+  border-color: rgb(2 6 23 / 0.07);
+  box-shadow: 0 1px 2px rgb(2 6 23 / 0.04), 0 14px 34px -24px rgb(2 6 23 / 0.22);
+}
+html:not(.dark) .panel-sunken {
+  background: rgb(248 250 252 / 0.9);
+  border-color: rgb(2 6 23 / 0.07);
+}
+.dark .card,
+.dark .panel,
+.dark .panel-raised {
+  background: rgb(255 255 255 / 0.04);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border-color: rgb(255 255 255 / 0.09);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 48px -24px rgb(0 0 0 / 0.6);
+}
+.dark .panel-sunken {
+  background: rgb(255 255 255 / 0.03);
+  border-color: rgb(255 255 255 / 0.08);
+}
