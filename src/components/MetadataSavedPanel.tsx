@@ -10,12 +10,12 @@ import { MetadataEditDrawer } from '@/components/MetadataEditDrawer';
  * (so stale panels never appear for other documents).
  */
 export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
-  const last = useMetadataStore((s) => s.last);
+  const last = useMetadataStore((s) => s.get(filename ?? null));
   const { signedIn } = useMetaAuth();
   const [loginOpen, setLoginOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
-  if (!last || !filename || last.filename !== filename) return null;
+  if (!last) return null;
 
   return (
     <div className="panel-sunken flex flex-wrap items-center gap-3 px-4 py-3">

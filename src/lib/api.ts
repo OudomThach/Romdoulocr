@@ -116,10 +116,10 @@ function reportExtraction(
   };
   // One cheap retry on a failed first attempt (still fully fire-and-forget).
   void postExtraction(payload).then((summary) => {
-    if (summary) useMetadataStore.getState().setLast(summary);
+    if (summary) useMetadataStore.getState().add(summary);
     else {
       void postExtraction(payload).then((retry) => {
-        if (retry) useMetadataStore.getState().setLast(retry);
+        if (retry) useMetadataStore.getState().add(retry);
       });
     }
   });

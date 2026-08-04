@@ -114,12 +114,12 @@ export function MetadataTab() {
   const [selected, setSelected] = useState<MetaRecord | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
 
-  const { data: meta } = useQuery({
+  const { data: meta, isError: metaError } = useQuery({
     queryKey: ['meta-meta'],
     queryFn: metaClient.meta,
     enabled: signedIn,
   });
-  const { data: page, isLoading, isFetching } = useQuery({
+  const { data: page, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ['meta-records', filters],
     queryFn: () => metaClient.listRecords(filters),
     enabled: signedIn,
@@ -235,6 +235,15 @@ export function MetadataTab() {
       </div>
 
       <div className="panel mt-3 overflow-x-auto">
+        {(isError || metaError) && (
+          <div className="m-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+            <span className="font-semibold">Could not load records.</span>{' '}
+            {error instanceof Error ? error.message : 'Check the connection and try again.'}{' '}
+            <button type="button" className="underline" onClick={() => qc.invalidateQueries({ queryKey: ['meta-records'] })}>
+              Retry
+            </button>
+          </div>
+        )}
         <table className="w-full">
           <thead className="border-b border-slate-200 bg-slate-50/60">
             <tr>
