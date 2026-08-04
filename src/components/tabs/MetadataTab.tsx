@@ -114,7 +114,7 @@ function RecordDetail({
   canDelete: boolean;
   onSaved: () => void;
 }) {
-  const [tab, setTab] = useState<'overview' | 'data' | 'history'>('overview');
+  const [tab, setTab] = useState<'data' | 'details' | 'history'>('data');
   const qc = useQueryClient();
   const toast = useToastStore((s) => s.push);
   const [saving, setSaving] = useState(false);
@@ -154,18 +154,18 @@ function RecordDetail({
       </div>
 
       <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm w-fit">
-        <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>
-          Overview
-        </TabButton>
         <TabButton active={tab === 'data'} onClick={() => setTab('data')}>
-          Data
+          Edit data
+        </TabButton>
+        <TabButton active={tab === 'details'} onClick={() => setTab('details')}>
+          Details
         </TabButton>
         <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
           History
         </TabButton>
       </div>
 
-      {tab === 'overview' && (
+      {tab === 'details' && (
         <div className="grid gap-3 md:grid-cols-2">
           <div className="panel p-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Source</div>
@@ -215,6 +215,7 @@ export function MetadataTab() {
   const { signedIn, user } = useMetaAuth();
   const qc = useQueryClient();
   const toast = useToastStore((s) => s.push);
+  const pendingRecordId = useMetadataStore((s) => s.pendingRecordId);
   const consumePendingRecord = useMetadataStore((s) => s.consumePendingRecord);
   const [filters, setFilters] = useState<MetaQuery>({ page: 1, page_size: PAGE_SIZE, sort: 'created_at:desc' });
   const [search, setSearch] = useState('');
@@ -222,15 +223,16 @@ export function MetadataTab() {
   const [selected, setSelected] = useState<MetaRecord | null>(null);
 
   // Auto-open a record when another tab's "Edit & history" button fired.
+  // Subscribes to pendingRecordId so it also fires when ALREADY mounted.
   useEffect(() => {
-    if (!signedIn) return;
-    const pendingId = consumePendingRecord();
-    if (!pendingId) return;
+    if (!signedIn || !pendingRecordId) return;
+    const id = consumePendingRecord();
+    if (!id) return;
     metaClient
-      .getRecord(pendingId)
+      .getRecord(id)
       .then((rec) => setSelected(rec))
       .catch(() => toast('Could not open record', 'error'));
-  }, [signedIn, consumePendingRecord, toast]);
+  }, [signedIn, pendingRecordId, consumePendingRecord, toast]);
 
   const { data: meta, isError: metaError } = useQuery({
     queryKey: ['meta-meta'],
@@ -300,8 +302,10 @@ export function MetadataTab() {
     <div className="p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight text-slate-950">Extraction records</h1>
-          <p className="text-xs text-slate-500">Signed in as {user?.username}</p>
+          <h1 className="text-lg font-semibold tracking-tight text-slate-950">Your extraction records</h1>
+          <p className="text-xs text-slate-500">
+            Every document you parse is saved here — click a row to view or edit it.
+          </p>
         </div>
         <div className="flex gap-2">
           <a className="btn-secondary px-3 py-1.5 text-xs" href={metaClient.exportUrl('csv', filters)}>
@@ -383,7 +387,9 @@ export function MetadataTab() {
             )}
             {page?.items.length === 0 && (
               <tr>
-                <td className="td text-slate-500" colSpan={6}>No records match the filters.</td>
+                <td className="td text-slate-500" colSpan={6}>
+                  No records yet — parse a document and it will be saved here automatically.
+                </td>
               </tr>
             )}
             {page?.items.map((r) => (

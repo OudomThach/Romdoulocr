@@ -91,7 +91,7 @@ export default function RecordDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"overview" | "data" | "history">("overview");
+  const [tab, setTab] = useState<"data" | "details" | "history">("data");
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -135,12 +135,12 @@ export default function RecordDetail() {
       </div>
 
       <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white dark:bg-white/5 p-0.5 shadow-sm w-fit mb-4">
-        <TabButton active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabButton>
-        <TabButton active={tab === "data"} onClick={() => setTab("data")}>Data</TabButton>
+        <TabButton active={tab === "data"} onClick={() => setTab("data")}>Edit data</TabButton>
+        <TabButton active={tab === "details"} onClick={() => setTab("details")}>Details</TabButton>
         <TabButton active={tab === "history"} onClick={() => setTab("history")}>History</TabButton>
       </div>
 
-      {tab === "overview" && (
+      {tab === "details" && (
         <div className="grid md:grid-cols-2 gap-4">
           <Section title="Source">
             <KV obj={rec.source} />
