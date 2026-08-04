@@ -67,10 +67,25 @@ export interface MetaQuery {
 const TOKEN_KEY = 'metadata_token';
 const USER_KEY = 'metadata_user';
 
+// Snapshot caching: useSyncExternalStore REQUIRES getSnapshot to return a
+// stable reference until the underlying value changes. JSON.parse creates a
+// new object every call — without caching, React sees a "changed" value on
+// every render, loops forever and the UI goes blank the moment a user is
+// signed in. Cache by raw storage string.
+let cachedTokenRaw: string | null = null;
+let cachedToken: string | null = null;
+let cachedUserRaw: string | null = null;
+let cachedUser: MetaUser | null = null;
+
 export const metaSession = {
   token(): string | null {
     try {
-      return localStorage.getItem(TOKEN_KEY);
+      const raw = localStorage.getItem(TOKEN_KEY);
+      if (raw !== cachedTokenRaw) {
+        cachedTokenRaw = raw;
+        cachedToken = raw;
+      }
+      return cachedToken;
     } catch {
       return null;
     }
@@ -78,7 +93,11 @@ export const metaSession = {
   user(): MetaUser | null {
     try {
       const raw = localStorage.getItem(USER_KEY);
-      return raw ? (JSON.parse(raw) as MetaUser) : null;
+      if (raw !== cachedUserRaw) {
+        cachedUserRaw = raw;
+        cachedUser = raw ? (JSON.parse(raw) as MetaUser) : null;
+      }
+      return cachedUser;
     } catch {
       return null;
     }
@@ -87,6 +106,10 @@ export const metaSession = {
     try {
       localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem(USER_KEY, JSON.stringify(user));
+      cachedTokenRaw = token;
+      cachedToken = token;
+      cachedUserRaw = JSON.stringify(user);
+      cachedUser = user;
     } catch {
       // storage blocked — session just won't persist
     }
@@ -98,6 +121,10 @@ export const metaSession = {
     } catch {
       // ignore
     }
+    cachedTokenRaw = null;
+    cachedToken = null;
+    cachedUserRaw = null;
+    cachedUser = null;
   },
 };
 
