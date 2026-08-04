@@ -51,6 +51,14 @@ export interface MetaStats {
   per_day: Record<string, number>[];
 }
 
+export interface MetaHistoryEvent {
+  id: number;
+  action: string;
+  actor: string;
+  at: string;
+  snapshot: Record<string, unknown>;
+}
+
 export interface MetaQuery {
   page?: number;
   page_size?: number;
@@ -188,6 +196,9 @@ export const metaClient = {
   },
   getRecord(id: string): Promise<MetaRecord> {
     return request(`/records/${encodeURIComponent(id)}`);
+  },
+  recordHistory(id: string): Promise<MetaHistoryEvent[]> {
+    return request(`/records/${encodeURIComponent(id)}/history`);
   },
   patchRecord(id: string, body: Record<string, unknown>): Promise<MetaRecord> {
     return request(`/records/${encodeURIComponent(id)}`, {

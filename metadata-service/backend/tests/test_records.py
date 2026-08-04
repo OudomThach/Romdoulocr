@@ -107,3 +107,22 @@ async def test_audit_log_written_on_create_and_update(auth_client):
     async with SessionLocal() as s:
         actions = [a.action for a in (await s.execute(select(AuditEvent).order_by(AuditEvent.id))).scalars()]
     assert actions == ["create", "update"]
+
+
+async def test_record_history_endpoint(auth_client):
+    await auth_client.post("/api/v1/records", json=sample_record())
+    await auth_client.patch("/api/v1/records/rec-0001", json={"data": {"order_no": "X"}})
+    r = await auth_client.get("/api/v1/records/rec-0001/history")
+    assert r.status_code == 200
+    events = r.json()
+    assert len(events) == 2
+    assert events[0]["action"] == "create"
+    assert events[0]["actor"] == "system:api"
+    assert events[1]["action"] == "update"
+    assert events[1]["actor"] == "user:admin"
+    assert "snapshot" in events[0]
+
+
+async def test_record_history_not_found(auth_client):
+    r = await auth_client.get("/api/v1/records/nope/history")
+    assert r.status_code == 404

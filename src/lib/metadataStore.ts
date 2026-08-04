@@ -17,6 +17,9 @@ interface MetadataState {
   add: (s: MetaSummary) => void;
   get: (filename: string | null | undefined) => MetaSummary | null;
   clear: () => void;
+  pendingRecordId: string | null;
+  openRecord: (id: string) => void;
+  consumePendingRecord: () => string | null;
 }
 
 const MAX_ENTRIES = 20;
@@ -37,4 +40,11 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
     }),
   get: (filename) => (filename ? get().byFilename[filename] ?? null : null),
   clear: () => set({ byFilename: {} }),
+  pendingRecordId: null,
+  openRecord: (id) => set({ pendingRecordId: id }),
+  consumePendingRecord: () => {
+    const id = get().pendingRecordId;
+    if (id) set({ pendingRecordId: null });
+    return id;
+  },
 }));

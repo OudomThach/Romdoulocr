@@ -167,6 +167,34 @@ async def get_record(record_id: str, session: AsyncSession = Depends(get_session
     return crud.to_out(rec)
 
 
+@router.get("/{record_id}/history", response_model=list[schemas.AuditEventOut])
+async def record_history(
+    record_id: str,
+    session: AsyncSession = Depends(get_session),
+    _actor: Actor = Depends(require_auth),
+) -> list[schemas.AuditEventOut]:
+    rec = await session.get(models.Record, record_id)
+    if not rec:
+        raise APIError(404, "not_found", f"record {record_id} not found")
+    rows = (
+        await session.execute(
+            select(models.AuditEvent)
+            .where(models.AuditEvent.record_id == record_id)
+            .order_by(models.AuditEvent.at.asc())
+        )
+    ).scalars().all()
+    return [
+        schemas.AuditEventOut(
+            id=e.id,
+            action=e.action,
+            actor=e.actor,
+            at=e.at,
+            snapshot=e.envelope_snapshot,
+        )
+        for e in rows
+    ]
+
+
 @router.patch("/{record_id}", response_model=schemas.RecordOut)
 async def patch_record(
     record_id: str,

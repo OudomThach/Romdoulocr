@@ -2,20 +2,29 @@ import { useState } from 'react';
 import { useMetadataStore } from '@/lib/metadataStore';
 import { useMetaAuth } from '@/lib/useMetaAuth';
 import { LoginModal } from '@/components/LoginModal';
-import { MetadataEditDrawer } from '@/components/MetadataEditDrawer';
+import { useSettingsStore } from '@/hooks/useSettingsStore';
 
 /**
  * Inline "Metadata saved" panel shown in a tab's results area after a parse.
  * Only renders when the saved record's filename matches the displayed result
  * (so stale panels never appear for other documents).
+ *
+ * "Edit" opens the record in the Metadata tab's full editor (form + history)
+ * via the shared metadata store + tab switcher.
  */
 export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const last = useMetadataStore((s) => s.get(filename ?? null));
+  const openRecord = useMetadataStore((s) => s.openRecord);
+  const setActiveTab = useSettingsStore((s) => s.setActiveTab);
   const { signedIn } = useMetaAuth();
   const [loginOpen, setLoginOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
 
   if (!last) return null;
+
+  const openEditor = () => {
+    openRecord(last.id);
+    setActiveTab('metadata');
+  };
 
   return (
     <div className="panel-sunken flex flex-wrap items-center gap-3 px-4 py-3">
@@ -37,8 +46,8 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {signedIn ? (
-          <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setEditId(last.id)}>
-            Edit data
+          <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={openEditor}>
+            Edit & history
           </button>
         ) : (
           <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setLoginOpen(true)}>
@@ -51,7 +60,6 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       </div>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
-      {editId && <MetadataEditDrawer recordId={editId} onClose={() => setEditId(null)} />}
     </div>
   );
 }

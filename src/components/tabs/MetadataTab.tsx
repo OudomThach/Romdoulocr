@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { metaClient, type MetaQuery, type MetaRecord } from '@/lib/metaClient';
 import { useMetaAuth } from '@/lib/useMetaAuth';
 import { LoginModal } from '@/components/LoginModal';
-import { MetadataEditDrawer } from '@/components/MetadataEditDrawer';
+import { DataFormEditor } from '@/components/DataFormEditor';
+import { useMetadataStore } from '@/lib/metadataStore';
 import { useToastStore } from '@/hooks/useToastStore';
 
 const PAGE_SIZE = 25;
@@ -37,19 +38,105 @@ function KV({ obj }: { obj: Record<string, unknown> | null | undefined }) {
   );
 }
 
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+        active ? 'bg-slate-100 text-slate-950' : 'text-slate-500 hover:text-slate-800'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function HistoryTimeline({ recordId }: { recordId: string }) {
+  const { data: events, isLoading, isError } = useQuery({
+    queryKey: ['meta-history', recordId],
+    queryFn: () => metaClient.recordHistory(recordId),
+  });
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  if (isLoading) return <div className="text-sm text-slate-500">Loading history…</div>;
+  if (isError || !events) return <div className="text-sm text-red-500">Could not load history.</div>;
+  if (events.length === 0) return <div className="text-sm text-slate-500">No history yet.</div>;
+
+  return (
+    <ol className="relative space-y-4 border-l border-slate-200 pl-4">
+      {events.map((ev) => (
+        <li key={ev.id} className="relative">
+          <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-accent shadow" />
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span
+              className={`badge ${
+                ev.action === 'create'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
+                  : ev.action === 'delete'
+                    ? 'border-red-500/30 bg-red-500/10 text-red-500'
+                    : 'border-accent2/30 bg-accent2/10 text-accent2'
+              }`}
+            >
+              {ev.action}
+            </span>
+            <span className="font-mono text-xs text-slate-600">{ev.actor}</span>
+            <span className="text-xs text-slate-400">{new Date(ev.at).toLocaleString()}</span>
+            <button
+              type="button"
+              className="ml-auto text-xs text-slate-400 hover:text-slate-700"
+              onClick={() => setExpanded(expanded === ev.id ? null : ev.id)}
+            >
+              {expanded === ev.id ? 'hide snapshot' : 'view snapshot'}
+            </button>
+          </div>
+          {expanded === ev.id && (
+            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 p-3 font-mono text-[11px]">
+              {JSON.stringify(ev.snapshot, null, 2)}
+            </pre>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function RecordDetail({
   rec,
   onBack,
-  onEdit,
   onDelete,
   canDelete,
+  onSaved,
 }: {
   rec: MetaRecord;
   onBack: () => void;
-  onEdit: () => void;
   onDelete: () => void;
   canDelete: boolean;
+  onSaved: () => void;
 }) {
+  const [tab, setTab] = useState<'overview' | 'data' | 'history'>('overview');
+  const qc = useQueryClient();
+  const toast = useToastStore((s) => s.push);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const save = async (data: Record<string, unknown>) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await metaClient.patchRecord(rec.id, { data });
+      toast('Record updated — status: edited', 'success');
+      qc.invalidateQueries({ queryKey: ['meta-records'] });
+      qc.invalidateQueries({ queryKey: ['record', rec.id] });
+      qc.invalidateQueries({ queryKey: ['meta-history', rec.id] });
+      onSaved();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -66,40 +153,60 @@ function RecordDetail({
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="panel p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Source</div>
-          <KV obj={rec.source} />
-          <div className="mt-2 text-xs text-slate-500">model: {rec.source_model ?? '—'} · system: {rec.source_system ?? '—'}</div>
-        </div>
-        <div className="panel p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Audit</div>
-          <KV obj={rec.audit} />
-          <div className="mt-2 text-xs text-slate-500">
-            created_by: {rec.created_by} · edited_by: {rec.edited_by ?? '—'} · edits: {rec.edit_count}
-          </div>
-        </div>
-        <div className="panel p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Pipeline</div>
-          <KV obj={rec.pipeline} />
-        </div>
-        <div className="panel p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Business</div>
-          <KV obj={rec.business} />
-        </div>
+      <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm w-fit">
+        <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>
+          Overview
+        </TabButton>
+        <TabButton active={tab === 'data'} onClick={() => setTab('data')}>
+          Data
+        </TabButton>
+        <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
+          History
+        </TabButton>
       </div>
 
-      <div className="panel p-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Data payload</div>
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">
-          {JSON.stringify(rec.data, null, 2)}
-        </pre>
-        <div className="mt-3 flex justify-end">
-          <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={onEdit}>
-            Edit data
-          </button>
+      {tab === 'overview' && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="panel p-4">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Source</div>
+            <KV obj={rec.source} />
+            <div className="mt-2 text-xs text-slate-500">model: {rec.source_model ?? '—'} · system: {rec.source_system ?? '—'}</div>
+          </div>
+          <div className="panel p-4">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Audit</div>
+            <KV obj={rec.audit} />
+            <div className="mt-2 text-xs text-slate-500">
+              created_by: {rec.created_by} · edited_by: {rec.edited_by ?? '—'} · edits: {rec.edit_count}
+            </div>
+          </div>
+          <div className="panel p-4">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Pipeline</div>
+            <KV obj={rec.pipeline} />
+          </div>
+          <div className="panel p-4">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Business</div>
+            <KV obj={rec.business} />
+          </div>
         </div>
-      </div>
+      )}
+
+      {tab === 'data' && (
+        <div className="panel p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Data payload — edit the extraction result
+          </div>
+          <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => void save(d)} />
+          {saving && <p className="mt-2 text-xs text-slate-500">Saving…</p>}
+          {saveError && <p className="mt-2 text-xs text-red-500">{saveError}</p>}
+        </div>
+      )}
+
+      {tab === 'history' && (
+        <div className="panel p-4">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Edit history</div>
+          <HistoryTimeline recordId={rec.id} />
+        </div>
+      )}
     </div>
   );
 }
@@ -108,11 +215,22 @@ export function MetadataTab() {
   const { signedIn, user } = useMetaAuth();
   const qc = useQueryClient();
   const toast = useToastStore((s) => s.push);
+  const consumePendingRecord = useMetadataStore((s) => s.consumePendingRecord);
   const [filters, setFilters] = useState<MetaQuery>({ page: 1, page_size: PAGE_SIZE, sort: 'created_at:desc' });
   const [search, setSearch] = useState('');
   const [loginOpen, setLoginOpen] = useState(false);
   const [selected, setSelected] = useState<MetaRecord | null>(null);
-  const [editId, setEditId] = useState<string | null>(null);
+
+  // Auto-open a record when another tab's "Edit & history" button fired.
+  useEffect(() => {
+    if (!signedIn) return;
+    const pendingId = consumePendingRecord();
+    if (!pendingId) return;
+    metaClient
+      .getRecord(pendingId)
+      .then((rec) => setSelected(rec))
+      .catch(() => toast('Could not open record', 'error'));
+  }, [signedIn, consumePendingRecord, toast]);
 
   const { data: meta, isError: metaError } = useQuery({
     queryKey: ['meta-meta'],
@@ -167,11 +285,13 @@ export function MetadataTab() {
         <RecordDetail
           rec={selected}
           onBack={() => setSelected(null)}
-          onEdit={() => setEditId(selected.id)}
           onDelete={() => void remove(selected)}
           canDelete={user?.role === 'admin'}
+          onSaved={() => {
+            // Refresh the selected record so the form + audit reflect the save.
+            void metaClient.getRecord(selected.id).then(setSelected).catch(() => {});
+          }}
         />
-        {editId && <MetadataEditDrawer recordId={editId} onClose={() => setEditId(null)} />}
       </div>
     );
   }
@@ -301,8 +421,6 @@ export function MetadataTab() {
           </div>
         </div>
       )}
-
-      {editId && <MetadataEditDrawer recordId={editId} onClose={() => setEditId(null)} />}
     </div>
   );
 }

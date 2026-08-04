@@ -109,5 +109,13 @@ class PageOut(BaseModel):
     total_pages: int
 
 
+class AuditEventOut(BaseModel):
+    id: int
+    action: str
+    actor: str
+    at: dt.datetime
+    snapshot: dict[str, Any]
+
+
 class ErrorOut(BaseModel):
     error: dict[str, Any]

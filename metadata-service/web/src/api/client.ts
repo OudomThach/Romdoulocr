@@ -30,8 +30,7 @@ export interface RecordOut {
   source_system: string | null;
 }
 
-export interface Stats {
-  total: number;
+export interface Stats {  total: number;
   by_status: Record<string, number>;
   by_type: Record<string, number>;
   by_domain: Record<string, number>;
@@ -44,6 +43,14 @@ export interface Stats {
 export interface Meta {
   types: string[];
   domains: string[];
+}
+
+export interface AuditEventOut {
+  id: number;
+  action: string;
+  actor: string;
+  at: string;
+  snapshot: Record<string, unknown>;
 }
 
 export interface QueryParams {
@@ -135,6 +142,7 @@ export const api = {
   listRecords: (p: QueryParams) =>
     http<Page<RecordOut>>(`${API}/records${qs({ ...p })}`),
   getRecord: (id: string) => http<RecordOut>(`${API}/records/${encodeURIComponent(id)}`),
+  recordHistory: (id: string) => http<AuditEventOut[]>(`${API}/records/${encodeURIComponent(id)}/history`),
   patchRecord: (id: string, body: Record<string, unknown>) =>
     http<RecordOut>(`${API}/records/${encodeURIComponent(id)}`, {
       method: "PATCH",
