@@ -23,6 +23,12 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       host: '127.0.0.1',
       proxy: {
+        '/api-meta': {
+          target: env.METADATA_URL || 'http://localhost:8095',
+          changeOrigin: true,
+          secure: false,
+          rewrite: (p) => p.replace(/^\/api-meta/, ''),
+        },
         '/api-vllm': {
           target: env.VLLM_ADAPTER_URL || 'http://localhost:8090',
           changeOrigin: true,
@@ -41,6 +47,12 @@ export default defineConfig(({ mode }) => {
       port: 4173,
       host: '127.0.0.1',
       proxy: {
+        '/api-meta': {
+          target: env.METADATA_URL || 'http://localhost:8095',
+          changeOrigin: true,
+          secure: false,
+          rewrite: (p) => p.replace(/^\/api-meta/, ''),
+        },
         '/api-vllm': {
           target: env.VLLM_ADAPTER_URL || 'http://localhost:8090',
           changeOrigin: true,

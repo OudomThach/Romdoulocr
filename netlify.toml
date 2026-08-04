@@ -33,6 +33,10 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # Same-origin metadata API: every parse on the PUBLIC site also saves an
+  # extraction record to the home metadata service (proxied below, fire-and-
+  # forget with a 2s cap — an unreachable home PC never affects parsing).
+  VITE_METADATA_URL = "/api-meta"
   # No VITE_*_URL here on purpose -- unset makes the SPA fall back to the
   # relative paths (/api, /api-vllm, /api-lens, /api-tidy) proxied below.
   # See src/lib/backend.ts and src/lib/tidy.ts for those defaults.
@@ -83,6 +87,15 @@
   status = 200
   force = true
 
+# Metadata service: full public API (records CRUD, export, stats, meta, docs).
+# Public callers use https://romdoulocr.netlify.app/api-meta/api/v1/records — no
+# CORS issues since Netlify rewrites server-side to the home funnel.
+[[redirects]]
+  from = "/api-meta/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-meta/:splat"
+  status = 200
+  force = true
+
 # Versioned public entry point for third-party integrators (/v1/api/...).
 #
 # Written out per engine, mapping straight to the UNVERSIONED upstream path,
@@ -118,6 +131,12 @@
 [[redirects]]
   from = "/v1/api-tidy/*"
   to = "https://apt-server-desktop.tail806605.ts.net/api-tidy/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/v1/api-meta/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/api-meta/:splat"
   status = 200
   force = true
 

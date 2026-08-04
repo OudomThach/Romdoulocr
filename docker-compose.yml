@@ -1,7 +1,7 @@
 # Convenience compose file: builds the image and runs the container.
 #
 # Both knobs default to the public Khmer Parser API; override at build time:
-#   API_UPSTREAM=https://your-api.example.com VITE_API_URL=/api docker compose build
+#   API_UPSTREAM=https://your-api.example.com VITE_API_URL=/api
 #
 # VITE_API_URL defaults to "/api" (relative), which routes through the
 # in-container nginx proxy. Set it to a full URL only if you've confirmed
@@ -28,6 +28,9 @@ services:
         # Forwarded to the vLLM adapter (must match the adapter's ADAPTER_TOKEN).
         # From the gitignored .env; empty when unset (no gate).
         ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
+        # Point at the metadata service to record every parse (fire-and-forget
+        # POST per successful extraction). Empty = reporting disabled.
+        METADATA_URL: ${METADATA_URL:-}
     image: khmer-parser-ui:latest
     container_name: khmer-parser-ui
     restart: unless-stopped

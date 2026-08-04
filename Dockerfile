@@ -19,6 +19,12 @@ COPY . .
 ARG API_UPSTREAM=https://rinabuoy13--khparser-api.modal.run
 ENV VITE_API_URL=/api
 
+# Optional metadata service URL; empty = extraction reporting disabled.
+# The browser calls it directly (host.docker.internal reaches host services
+# from Docker Desktop), fire-and-forget, 2s cap.
+ARG METADATA_URL=
+ENV VITE_METADATA_URL=$METADATA_URL
+
 RUN npm run build
 
 # --- Stage 2: Serve with nginx (static + same-origin API proxy) ---------

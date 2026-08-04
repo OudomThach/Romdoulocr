@@ -30,6 +30,69 @@ export class ApiError extends Error {
   }
 }
 
+// --------------------------------------------------------------------------- //
+// Metadata service reporting (fire-and-forget)
+//
+// When VITE_METADATA_URL is set (e.g. http://localhost:8095), every successful
+// parse also posts an extraction record to the metadata service. This is
+// deliberately invisible to the caller: a 2s cap + swallowed errors mean the
+// pipeline can never be slowed or broken by the reporter.
+// --------------------------------------------------------------------------- //
+const METADATA_URL = (import.meta.env.VITE_METADATA_URL ?? '').replace(/\/$/, '');
+const METADATA_PIPELINE = import.meta.env.VITE_METADATA_PIPELINE ?? 'romdoul-spa';
+
+function reportExtraction(
+  type: string,
+  filename: string | undefined,
+  result: unknown,
+  backend: BackendId | undefined,
+): void {
+  if (!METADATA_URL) return;
+  const data = (result ?? {}) as Record<string, unknown>;
+  const pages = Array.isArray(data.pages) ? data.pages : [];
+  const fullText =
+    typeof data.full_text === 'string'
+      ? data.full_text.slice(0, 50_000)
+      : typeof data.text === 'string'
+        ? data.text.slice(0, 50_000)
+        : undefined;
+  const payload = {
+    type,
+    source: {
+      filename,
+      model: backend ?? getBackend(),
+      source_system: 'khmer-parser-ui',
+      extracted_at: new Date().toISOString(),
+    },
+    pipeline: { version: METADATA_PIPELINE },
+    business: { tags: [backend ?? getBackend()], domain: 'documents' },
+    data: {
+      filename,
+      num_pages: typeof data.num_pages === 'number' ? data.num_pages : pages.length,
+      pages: pages.map((p: Record<string, unknown>) => ({
+        page_number: p.page_number,
+        width: p.width,
+        height: p.height,
+        region_count: Array.isArray(p.regions) ? p.regions.length : 0,
+      })),
+      ...(fullText !== undefined ? { full_text: fullText } : {}),
+      ...(typeof data.num_rows === 'number' ? { num_rows: data.num_rows } : {}),
+      ...(typeof data.num_cols === 'number' ? { num_cols: data.num_cols } : {}),
+    },
+  };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2_000);
+  // Deferred + swallowed: never blocks or fails the extraction path.
+  void fetch(`${METADATA_URL}/api/v1/records`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: ctrl.signal,
+  })
+    .catch(() => {})
+    .finally(() => clearTimeout(timer));
+}
+
 /** Distinguish a user-initiated abort from a real network/HTTP failure. */
 export class AbortError extends Error {
   constructor() {
@@ -202,7 +265,10 @@ export const api = {
     qs.set('use_ctc', opts.useCtc === false ? 'false' : USE_CTC_DEFAULT);
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    return uploadWithProgress<DocumentResult>(`/parse-pdf${suffix}`, fd, progress);
+    return uploadWithProgress<DocumentResult>(`/parse-pdf${suffix}`, fd, progress).then((r) => {
+      reportExtraction('document', r.filename, r, progress.backend);
+      return r;
+    });
   },
 
   /**
@@ -223,7 +289,10 @@ export const api = {
     qs.set('use_ctc', opts.useCtc === false ? 'false' : USE_CTC_DEFAULT);
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    return uploadWithProgress<DocumentResult>(`/parse-pdf-translated${suffix}`, fd, progress);
+    return uploadWithProgress<DocumentResult>(`/parse-pdf-translated${suffix}`, fd, progress).then((r) => {
+      reportExtraction('document_translated', r.filename, r, progress.backend);
+      return r;
+    });
   },
 
   /**
@@ -240,7 +309,10 @@ export const api = {
     qs.set('use_ctc', opts.useCtc === false ? 'false' : USE_CTC_DEFAULT);
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    return uploadWithProgress<OcrImageResponse>(`/ocr-image${suffix}`, fd, { ...progress, rawFallback: true });
+    return uploadWithProgress<OcrImageResponse>(`/ocr-image${suffix}`, fd, { ...progress, rawFallback: true }).then((r) => {
+      reportExtraction('ocr_image', r.filename, r, progress.backend);
+      return r;
+    });
   },
 
   /**
@@ -258,7 +330,10 @@ export const api = {
     if (opts.rowTolerance !== undefined) qs.set('row_tolerance', String(opts.rowTolerance));
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    return uploadWithProgress<TableResult>(`/parse-table${suffix}`, fd, progress);
+    return uploadWithProgress<TableResult>(`/parse-table${suffix}`, fd, progress).then((r) => {
+      reportExtraction('table', r.filename, r, progress.backend);
+      return r;
+    });
   },
 };
 
