@@ -6,7 +6,7 @@ import { useToastStore } from '@/hooks/useToastStore';
  * In-app login for the metadata service. Same session keys as the /portal app,
  * so signing in here signs you in there (and vice versa).
  */
-export function LoginModal({ onClose }: { onClose: () => void }) {
+export function LoginModal({ onClose, onSuccess }: { onClose: () => void; onSuccess?: () => void }) {
   const toast = useToastStore((s) => s.push);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -23,6 +23,7 @@ export function LoginModal({ onClose }: { onClose: () => void }) {
       notifyAuthChanged();
       toast('Signed in as ' + res.user.username, 'success');
       onClose();
+      onSuccess?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {

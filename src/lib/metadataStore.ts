@@ -16,6 +16,7 @@ interface MetadataState {
   byFilename: Record<string, MetaSummary>;
   add: (s: MetaSummary) => void;
   get: (filename: string | null | undefined) => MetaSummary | null;
+  patchSummary: (id: string, patch: Partial<Pick<MetaSummary, 'status'>>) => void;
   clear: () => void;
   pendingRecordId: string | null;
   openRecord: (id: string) => void;
@@ -39,6 +40,12 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
       return { byFilename };
     }),
   get: (filename) => (filename ? get().byFilename[filename] ?? null : null),
+  patchSummary: (id, patch) =>
+    set((state) => {
+      const entry = Object.values(state.byFilename).find((e) => e.id === id);
+      if (!entry) return state;
+      return { byFilename: { ...state.byFilename, [entry.filename]: { ...entry, ...patch } } };
+    }),
   clear: () => set({ byFilename: {} }),
   pendingRecordId: null,
   openRecord: (id) => set({ pendingRecordId: id }),
