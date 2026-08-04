@@ -96,6 +96,19 @@
   status = 200
   force = true
 
+# Metadata portal — same origin as the OCR app. Login-gated on the data side.
+[[redirects]]
+  from = "/portal"
+  to = "https://apt-server-desktop.tail806605.ts.net/portal/"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/portal/*"
+  to = "https://apt-server-desktop.tail806605.ts.net/portal/:splat"
+  status = 200
+  force = true
+
 # Versioned public entry point for third-party integrators (/v1/api/...).
 #
 # Written out per engine, mapping straight to the UNVERSIONED upstream path,
