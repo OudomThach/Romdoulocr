@@ -5,6 +5,7 @@ import type {
   TableResult,
 } from '@/types/api';
 import { getBaseUrl, baseUrlFor, getBackend, getRenderDpi, type BackendId } from '@/lib/backend';
+import { useMetadataStore, type MetaSummary } from '@/lib/metadataStore';
 
 // The API base is resolved at call time (not module load) so the in-app
 // backend toggle can switch between the default upstream ("/api", proxied to
@@ -33,13 +34,45 @@ export class ApiError extends Error {
 // --------------------------------------------------------------------------- //
 // Metadata service reporting (fire-and-forget)
 //
-// When VITE_METADATA_URL is set (e.g. http://localhost:8095), every successful
-// parse also posts an extraction record to the metadata service. This is
-// deliberately invisible to the caller: a 2s cap + swallowed errors mean the
-// pipeline can never be slowed or broken by the reporter.
+// When VITE_METADATA_URL is set (e.g. /api-meta or http://localhost:8095),
+// every successful parse also posts an extraction record to the metadata
+// service. Deliberately invisible to the caller: a 5s cap + swallowed errors
+// mean the pipeline can never be slowed or broken by the reporter. Returns the
+// created record summary (or null when disabled / failed) so tabs can show an
+// inline "Metadata saved" panel.
 // --------------------------------------------------------------------------- //
 const METADATA_URL = (import.meta.env.VITE_METADATA_URL ?? '').replace(/\/$/, '');
 const METADATA_PIPELINE = import.meta.env.VITE_METADATA_PIPELINE ?? 'romdoul-spa';
+
+async function postExtraction(payload: {
+  type: string;
+  source: { filename?: string; model: string };
+  data: { filename?: string };
+}): Promise<MetaSummary | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5_000);
+  try {
+    const res = await fetch(`${METADATA_URL}/api/v1/records`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { id?: string; type?: string; status?: string };
+    return {
+      id: body.id ?? '',
+      type: body.type ?? payload.type ?? '',
+      status: body.status ?? 'raw',
+      model: payload.source.model ?? '',
+      filename: payload.source.filename ?? payload.data.filename ?? '',
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function reportExtraction(
   type: string,
@@ -56,16 +89,17 @@ function reportExtraction(
       : typeof data.text === 'string'
         ? data.text.slice(0, 50_000)
         : undefined;
+  const resolved = backend ?? getBackend();
   const payload = {
     type,
     source: {
       filename,
-      model: backend ?? getBackend(),
+      model: resolved,
       source_system: 'khmer-parser-ui',
       extracted_at: new Date().toISOString(),
     },
     pipeline: { version: METADATA_PIPELINE },
-    business: { tags: [backend ?? getBackend()], domain: 'documents' },
+    business: { tags: [resolved], domain: 'documents' },
     data: {
       filename,
       num_pages: typeof data.num_pages === 'number' ? data.num_pages : pages.length,
@@ -80,17 +114,15 @@ function reportExtraction(
       ...(typeof data.num_cols === 'number' ? { num_cols: data.num_cols } : {}),
     },
   };
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 2_000);
-  // Deferred + swallowed: never blocks or fails the extraction path.
-  void fetch(`${METADATA_URL}/api/v1/records`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: ctrl.signal,
-  })
-    .catch(() => {})
-    .finally(() => clearTimeout(timer));
+  // One cheap retry on a failed first attempt (still fully fire-and-forget).
+  void postExtraction(payload).then((summary) => {
+    if (summary) useMetadataStore.getState().setLast(summary);
+    else {
+      void postExtraction(payload).then((retry) => {
+        if (retry) useMetadataStore.getState().setLast(retry);
+      });
+    }
+  });
 }
 
 /** Distinguish a user-initiated abort from a real network/HTTP failure. */

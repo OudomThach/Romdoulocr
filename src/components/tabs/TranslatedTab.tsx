@@ -42,6 +42,7 @@ import { preprocessOpts, rasterFor } from '@/lib/extractionConfig';
 import { mergeFullPageText } from '@/lib/mergeFullPage';
 import { ExtractionSettingsCard } from '@/components/ExtractionSettingsCard';
 import type { DocumentResult, PageResult } from '@/types/api';
+import { MetadataSavedPanel } from '@/components/MetadataSavedPanel';
 
 interface PreparedFile {
   id: string;
@@ -411,6 +412,9 @@ export function TranslatedTab() {
               >
                 <span aria-hidden>↺</span> Back · run again
               </button>
+            </div>
+            <div className="mb-3">
+              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
             </div>
           <ExtractionResultsCard
             result={currentResult}

@@ -26,6 +26,7 @@ import { useSettingsStore } from '@/hooks/useSettingsStore';
 import { preprocessOpts, rasterFor } from '@/lib/extractionConfig';
 import { ExtractionSettingsCard } from '@/components/ExtractionSettingsCard';
 import type { TableResult } from '@/types/api';
+import { MetadataSavedPanel } from '@/components/MetadataSavedPanel';
 
 interface PreparedFile {
   id: string;
@@ -289,6 +290,9 @@ export function TableParserTab() {
               >
                 <span aria-hidden>↺</span> Back · run again
               </button>
+            </div>
+            <div className="mb-3">
+              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
             </div>
           <TableExtractionResultsCard
             result={currentResult}

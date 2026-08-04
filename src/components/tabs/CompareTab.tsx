@@ -17,6 +17,7 @@ import { buildCompareDocx, buildGroundTruthTxt, buildOutputsJson, type CompareDo
 import { readParquetDataset } from '@/lib/parquetDataset';
 import { cer, pct } from '@/lib/textMetrics';
 import type { ComparePane, CompareRecord } from '@/lib/storage';
+import { MetadataSavedPanel } from '@/components/MetadataSavedPanel';
 
 /**
  * Compare tab — runs the SAME input through both backends (Khmer Parsing API + Surya OCR 2/vLLM)
@@ -1110,6 +1111,10 @@ export function CompareTab() {
             <span className="text-xs text-slate-500">· {doneIdxs.length} done</span>
           </div>
         )}
+
+        <div className="mt-3">
+          <MetadataSavedPanel filename={files[activeIdx]?.name ?? null} />
+        </div>
 
         {/* Page selection (any mode, PDF only) — all selected pages are processed. */}
         {isPdfFile(file) && (

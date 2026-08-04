@@ -17,6 +17,7 @@ import { useSettingsStore } from '@/hooks/useSettingsStore';
 import { minimalPreprocessOpts, rasterFor } from '@/lib/extractionConfig';
 import { useLocale } from '@/lib/i18n';
 import type { DocumentResult, OcrImageResponse } from '@/types/api';
+import { MetadataSavedPanel } from '@/components/MetadataSavedPanel';
 
 interface PreparedFile {
   id: string;
@@ -334,6 +335,10 @@ export function OcrImageTab() {
 
           <div className="mt-4">
             <VerificationNotice />
+          </div>
+
+          <div className="mt-4">
+            <MetadataSavedPanel filename={currentResult.filename ?? null} />
           </div>
 
           {/* Action row — thumb-sized, copy is the hero action. */}

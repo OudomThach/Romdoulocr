@@ -10,6 +10,7 @@ import { TableParserTab } from '@/components/tabs/TableParserTab';
 import { OcrImageTab } from '@/components/tabs/OcrImageTab';
 import { CompareTab } from '@/components/tabs/CompareTab';
 import { HistoryTab } from '@/components/tabs/HistoryTab';
+import { MetadataTab } from '@/components/tabs/MetadataTab';
 import { Toaster } from '@/components/Toaster';
 import { ShortcutsHelp } from '@/components/ShortcutsHelp';
 import { LanguageToggle } from '@/components/LanguageToggle';
@@ -19,7 +20,7 @@ import { useSettingsStore } from '@/hooks/useSettingsStore';
 import { useLocale } from '@/lib/i18n';
 
 interface TabDef {
-  id: 'document' | 'translated' | 'table' | 'ocr' | 'compare' | 'history';
+  id: 'document' | 'translated' | 'table' | 'ocr' | 'compare' | 'history' | 'metadata';
   component: () => React.JSX.Element;
 }
 
@@ -33,6 +34,7 @@ const TABS: TabDef[] = [
   { id: 'table', component: () => <TableParserTab /> },
   { id: 'compare', component: () => <CompareTab /> },
   { id: 'history', component: () => <HistoryTab /> },
+  { id: 'metadata', component: () => <MetadataTab /> },
 ];
 
 const SESSION_KEY = 'romdoul.session';
@@ -226,5 +228,7 @@ function TabIcon({ id, className }: { id: TabDef['id']; className?: string }) {
       return <svg {...p}><path d="M12 4v16" strokeLinecap="round" /><rect x="3" y="8" width="6" height="8" rx="1.5" /><rect x="15" y="8" width="6" height="8" rx="1.5" /></svg>;
     case 'history':
       return <svg {...p}><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" strokeLinecap="round" /></svg>;
+    case 'metadata':
+      return <svg {...p}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></svg>;
   }
 }

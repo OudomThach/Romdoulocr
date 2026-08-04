@@ -43,6 +43,7 @@ import { type ZipEntry } from '@/lib/zipExport';
 import { copyToClipboard, downloadText, isImage, isPdf } from '@/lib/utils';
 import { processImage } from '@/lib/imageProcessing';
 import type { DocumentResult, PageResult } from '@/types/api';
+import { MetadataSavedPanel } from '@/components/MetadataSavedPanel';
 
 interface PreparedFile {
   id: string;
@@ -416,6 +417,9 @@ export function DocumentParserTab() {
               >
                 <span aria-hidden>↺</span> Back · run again
               </button>
+            </div>
+            <div className="mb-3">
+              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
             </div>
           <ExtractionResultsCard
             result={currentResult}

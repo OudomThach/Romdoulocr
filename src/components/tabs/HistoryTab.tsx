@@ -26,6 +26,7 @@ const TAB_LABELS: Record<TabKind, string> = {
   table: 'Parse Table',
   compare: 'Compare',
   history: 'History',
+  metadata: 'Metadata',
 };
 
 function fmtDate(ts: number): string {

@@ -10,7 +10,7 @@
 
 import type { DocumentResult, OcrImageResponse, TableResult } from '@/types/api';
 
-export type TabKind = 'document' | 'translated' | 'ocr' | 'table' | 'history' | 'compare';
+export type TabKind = 'document' | 'translated' | 'ocr' | 'table' | 'history' | 'compare' | 'metadata';
 
 /** Settings snapshot — captured at run time so the run is fully reproducible. */
 export interface RunSettings {
