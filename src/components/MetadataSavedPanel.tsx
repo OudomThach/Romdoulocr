@@ -33,7 +33,11 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [subCategory, setSubCategory] = useState('');
   const [desc, setDesc] = useState('');
   const [published, setPublished] = useState(false);
+  const [copyright, setCopyright] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
+  const [title, setTitle] = useState('');
+  const [org, setOrg] = useState('');
+  const [location, setLocation] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +61,11 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setSubCategory((rec.business?.sub_category as string) ?? '');
       setDesc((rec.business?.description as string) ?? '');
       setPublished(Boolean(rec.business?.published));
+      setCopyright(Boolean(rec.business?.copyright));
       setImageUrl((rec.data?.image_url as string) ?? '');
+      setTitle((rec.business?.title as string) ?? '');
+      setOrg((rec.business?.organization as string) ?? '');
+      setLocation((rec.business?.location as string) ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load record');
     } finally {
@@ -85,6 +93,10 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           setSubCategory((rec.business?.sub_category as string) ?? '');
           setDesc((rec.business?.description as string) ?? '');
           setPublished(Boolean(rec.business?.published));
+          setCopyright(Boolean(rec.business?.copyright));
+          setTitle((rec.business?.title as string) ?? '');
+          setOrg((rec.business?.organization as string) ?? '');
+          setLocation((rec.business?.location as string) ?? '');
           setImageUrl((rec.data?.image_url as string) ?? '');
         }).catch(() => {})
           .finally(() => setLoading(false));
@@ -101,11 +113,15 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       category: category.trim() || null,
       sub_category: subCategory.trim() || null,
       description: desc.trim() || null,
+      title: title.trim() || null,
+      organization: org.trim() || null,
+      location: location.trim() || null,
       domain: domain.trim() || null,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       date: date || null,
       published: published || null,
       published_at: published ? new Date().toISOString() : null,
+      copyright: copyright || null,
     };
     const extras: Record<string, unknown> = {
       ...nextData,
@@ -202,6 +218,18 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                   <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Date</label>
                   <input className="input w-36" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Title</label>
+                  <input className="input w-36" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Q3 Revenue" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Org</label>
+                  <input className="input w-36" value={org} onChange={(e) => setOrg(e.target.value)} placeholder="e.g. MPTC" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Location</label>
+                  <input className="input w-36" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Phnom Penh" />
+                </div>
               </div>
               <div>
                 <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notes</label>
@@ -218,6 +246,17 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                     <span className={`block h-4 w-4 rounded-full bg-white shadow transition-transform ${published ? 'translate-x-4' : ''}`} />
                   </span>
                   <span className="text-sm text-slate-700">{published ? 'Published' : 'Not published'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCopyright((c) => !c)}
+                  className="flex items-center gap-2"
+                  aria-pressed={copyright}
+                >
+                  <span className={`h-5 w-9 rounded-full p-0.5 transition-colors ${copyright ? 'bg-accent2' : 'bg-slate-300'}`}>
+                    <span className={`block h-4 w-4 rounded-full bg-white shadow transition-transform ${copyright ? 'translate-x-4' : ''}`} />
+                  </span>
+                  <span className="text-sm text-slate-700">{copyright ? '© Copyright' : 'No copyright'}</span>
                 </button>
                 <div>
                   <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Image URL</label>
