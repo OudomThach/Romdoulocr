@@ -61,30 +61,68 @@ function HistoryTimeline({ recordId }: { recordId: string }) {
     update: "border-accent2/30 bg-accent2/10 text-accent2",
   };
 
+  const dataDiff = (prev: Record<string, unknown> | undefined, curr: Record<string, unknown> | undefined): Record<string, unknown> | null => {
+    if (!prev || !curr) return null;
+    const prevData = (prev.data || {}) as Record<string, unknown>;
+    const currData = (curr.data || {}) as Record<string, unknown>;
+    const diff: Record<string, unknown> = {};
+    for (const k of new Set([...Object.keys(prevData), ...Object.keys(currData)])) {
+      const was = JSON.stringify(prevData[k]), now = JSON.stringify(currData[k]);
+      if (was !== now) diff[k] = { from: prevData[k], to: currData[k] };
+    }
+    return Object.keys(diff).length > 0 ? diff : null;
+  };
+
+  const bizDiff = (prev: Record<string, unknown> | undefined, curr: Record<string, unknown> | undefined): Record<string, unknown> | null => {
+    if (!prev || !curr) return null;
+    const prevBiz = (prev.business || {}) as Record<string, unknown>;
+    const currBiz = (curr.business || {}) as Record<string, unknown>;
+    const diff: Record<string, unknown> = {};
+    for (const k of new Set([...Object.keys(prevBiz), ...Object.keys(currBiz)])) {
+      const was = JSON.stringify(prevBiz[k]), now = JSON.stringify(currBiz[k]);
+      if (was !== now) diff[k] = { from: prevBiz[k], to: currBiz[k] };
+    }
+    return Object.keys(diff).length > 0 ? diff : null;
+  };
+
   return (
     <ol className="relative space-y-4 border-l border-slate-200 dark:border-white/10 pl-4">
-      {events.map((ev: AuditEventOut) => (
+      {events.map((ev: AuditEventOut, i: number) => {
+        const prev = i > 0 ? events[i - 1].snapshot : undefined;
+        const dD = ev.action === "update" ? dataDiff(prev, ev.snapshot) : null;
+        const bD = ev.action === "update" ? bizDiff(prev, ev.snapshot) : null;
+        return (
         <li key={ev.id} className="relative">
           <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-base-800 bg-accent shadow" />
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className={`badge ${tone[ev.action] ?? tone.update}`}>{ev.action}</span>
             <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{ev.actor}</span>
             <span className="text-xs text-slate-400">{new Date(ev.at).toLocaleString()}</span>
-            <button
-              type="button"
-              className="ml-auto text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-              onClick={() => setExpanded(expanded === ev.id ? null : ev.id)}
-            >
-              {expanded === ev.id ? "hide snapshot" : "view snapshot"}
+            <button type="button" className="ml-auto text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+              onClick={() => setExpanded(expanded === ev.id ? null : ev.id)}>
+              {expanded === ev.id ? "hide" : "view"}
             </button>
           </div>
+          {dD && (
+            <div className="mt-1 text-xs text-slate-500">
+              <span className="font-medium text-accent2">data changed:</span>{" "}
+              {Object.keys(dD).join(", ")}
+            </div>
+          )}
+          {bD && (
+            <div className="mt-0.5 text-xs text-slate-500">
+              <span className="font-medium text-accent">business changed:</span>{" "}
+              {Object.keys(bD).join(", ")}
+            </div>
+          )}
           {expanded === ev.id && (
             <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 dark:bg-white/5 p-3 font-mono text-[11px]">
               {JSON.stringify(ev.snapshot, null, 2)}
             </pre>
           )}
         </li>
-      ))}
+        );
+      })}
     </ol>
   );
 }
