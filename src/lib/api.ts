@@ -94,6 +94,7 @@ function reportExtraction(
     type,
     source: {
       filename,
+      file_type: filename && filename.includes('.') ? filename.split('.').pop()?.toLowerCase() ?? null : null,
       model: resolved,
       source_system: 'khmer-parser-ui',
       extracted_at: new Date().toISOString(),
