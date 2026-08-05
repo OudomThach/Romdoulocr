@@ -79,6 +79,7 @@ function reportExtraction(
   filename: string | undefined,
   result: unknown,
   backend: BackendId | undefined,
+  sourceFile?: File | null,
 ): void {
   if (!METADATA_URL) return;
   const data = (result ?? {}) as Record<string, unknown>;
@@ -90,11 +91,14 @@ function reportExtraction(
         ? data.text.slice(0, 50_000)
         : undefined;
   const resolved = backend ?? getBackend();
-  const payload = {
+  const ext = filename && filename.includes('.') ? filename.split('.').pop()?.toLowerCase() ?? null : null;
+
+  const buildPayload = (thumbnailBase64?: string) => ({
     type,
     source: {
       filename,
-      file_type: filename && filename.includes('.') ? filename.split('.').pop()?.toLowerCase() ?? null : null,
+      file_type: ext,
+      thumbnail_base64: thumbnailBase64 ?? null,
       model: resolved,
       source_system: 'khmer-parser-ui',
       extracted_at: new Date().toISOString(),
@@ -114,15 +118,54 @@ function reportExtraction(
       ...(typeof data.num_rows === 'number' ? { num_rows: data.num_rows } : {}),
       ...(typeof data.num_cols === 'number' ? { num_cols: data.num_cols } : {}),
     },
-  };
-  // One cheap retry on a failed first attempt (still fully fire-and-forget).
-  void postExtraction(payload).then((summary) => {
-    if (summary) useMetadataStore.getState().add(summary);
-    else {
-      void postExtraction(payload).then((retry) => {
-        if (retry) useMetadataStore.getState().add(retry);
-      });
+  });
+
+  const doPost = (payload: ReturnType<typeof buildPayload>) =>
+    postExtraction(payload).then((summary) => {
+      if (summary) useMetadataStore.getState().add(summary);
+    });
+
+  const tryWithThumbnail = async () => {
+    let thumbnail: string | undefined;
+    if (sourceFile && sourceFile.type.startsWith('image/')) {
+      try {
+        thumbnail = await readThumbnail(sourceFile);
+      } catch { /* skip thumbnail on failure */ }
     }
+    const payload = buildPayload(thumbnail);
+    // Fire + one retry on first failure (still fully fire-and-forget).
+    void doPost(payload).then(() => {});
+    void doPost(payload).catch(() => {});
+  };
+
+  void tryWithThumbnail();
+}
+
+/** Generate a small (200px wide) JPEG thumbnail from a File. */
+function readThumbnail(file: File): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const w = Math.min(img.width, 200);
+      const h = Math.round((img.height / img.width) * w);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(undefined); return; }
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(undefined); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(undefined);
+        reader.readAsDataURL(blob);
+      }, 'image/jpeg', 0.6);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(undefined); };
+    img.src = url;
   });
 }
 
@@ -299,7 +342,7 @@ export const api = {
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return uploadWithProgress<DocumentResult>(`/parse-pdf${suffix}`, fd, progress).then((r) => {
-      reportExtraction('document', r.filename, r, progress.backend);
+      reportExtraction('document', r.filename, r, progress.backend, files[0]);
       return r;
     });
   },
@@ -323,7 +366,7 @@ export const api = {
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return uploadWithProgress<DocumentResult>(`/parse-pdf-translated${suffix}`, fd, progress).then((r) => {
-      reportExtraction('document_translated', r.filename, r, progress.backend);
+      reportExtraction('document_translated', r.filename, r, progress.backend, files[0]);
       return r;
     });
   },
@@ -343,7 +386,7 @@ export const api = {
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return uploadWithProgress<OcrImageResponse>(`/ocr-image${suffix}`, fd, { ...progress, rawFallback: true }).then((r) => {
-      reportExtraction('ocr_image', r.filename, r, progress.backend);
+      reportExtraction('ocr_image', r.filename, r, progress.backend, file);
       return r;
     });
   },
@@ -364,7 +407,7 @@ export const api = {
     withBackendParams(qs, progress.backend);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return uploadWithProgress<TableResult>(`/parse-table${suffix}`, fd, progress).then((r) => {
-      reportExtraction('table', r.filename, r, progress.backend);
+      reportExtraction('table', r.filename, r, progress.backend, file);
       return r;
     });
   },

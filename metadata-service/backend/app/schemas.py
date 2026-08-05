@@ -11,6 +11,7 @@ class SourceIn(BaseModel):
     document_id: str | None = None
     filename: str | None = None
     file_type: str | None = None
+    thumbnail_base64: str | None = None
     page: int | None = Field(default=None, ge=1)
     extracted_at: dt.datetime | None = None
     model: str | None = None

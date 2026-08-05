@@ -26,9 +26,10 @@ function StatusBadge({ status }: { status: string }) {
 
 function KV({ obj }: { obj: Record<string, unknown> | null | undefined }) {
   if (!obj || Object.keys(obj).length === 0) return <div className="text-xs text-slate-500">—</div>;
+  const skip = new Set(['thumbnail_base64']);
   return (
     <dl className="grid grid-cols-[150px_1fr] gap-x-3 gap-y-1.5">
-      {Object.entries(obj).map(([k, v]) => (
+      {Object.entries(obj).filter(([k]) => !skip.has(k)).map(([k, v]) => (
         <div key={k} className="contents">
           <dt className="text-xs text-slate-500 break-all">{k}</dt>
           <dd className="text-sm text-slate-700 break-all">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</dd>
@@ -179,6 +180,9 @@ function RecordDetail({
         <div className="grid gap-3 md:grid-cols-2">
           <div className="panel p-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Source</div>
+            {(rec.source?.thumbnail_base64 as string) && (
+              <img src={rec.source?.thumbnail_base64 as string} alt="Source preview" className="mb-3 max-h-44 rounded-lg border border-slate-200 object-contain" />
+            )}
             <KV obj={rec.source} />
             <div className="mt-2 text-xs text-slate-500">model: {rec.source_model ?? '—'} · system: {rec.source_system ?? '—'}</div>
           </div>
