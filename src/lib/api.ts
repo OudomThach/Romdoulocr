@@ -66,6 +66,7 @@ async function postExtraction(payload: {
       status: body.status ?? 'raw',
       model: payload.source.model ?? '',
       filename: payload.source.filename ?? payload.data.filename ?? '',
+      justCreated: true,
     };
   } catch {
     return null;
@@ -107,6 +108,7 @@ function reportExtraction(
     business: { tags: [resolved], domain: 'documents' },
     data: {
       filename,
+      document_name: filename ?? null,
       num_pages: typeof data.num_pages === 'number' ? data.num_pages : pages.length,
       pages: pages.map((p: Record<string, unknown>) => ({
         page_number: p.page_number,

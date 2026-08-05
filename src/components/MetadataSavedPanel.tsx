@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMetadataStore } from '@/lib/metadataStore';
 import { useMetaAuth } from '@/lib/useMetaAuth';
 import { metaClient } from '@/lib/metaClient';
@@ -15,6 +15,7 @@ import { useToastStore } from '@/hooks/useToastStore';
 export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const last = useMetadataStore((s) => s.get(filename ?? null));
   const patchSummary = useMetadataStore((s) => s.patchSummary);
+  const markOpened = useMetadataStore((s) => s.markOpened);
   const openRecord = useMetadataStore((s) => s.openRecord);
   const setActiveTab = useSettingsStore((s) => s.setActiveTab);
   const toast = useToastStore((s) => s.push);
@@ -26,6 +27,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [domain, setDomain] = useState('');
   const [tags, setTags] = useState('');
   const [date, setDate] = useState('');
+  const [docName, setDocName] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,12 +45,35 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setDomain((rec.business?.domain as string) ?? '');
       setTags(((rec.business?.tags as string[]) ?? []).join(', '));
       setDate((rec.business?.date as string) ?? '');
+      setDocName((rec.data?.document_name as string) ?? (rec.source?.filename as string) ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load record');
     } finally {
       setLoading(false);
     }
   };
+
+  // Auto-expand the fill-in form on freshly-extracted records so users can
+  // complete the metadata (domain, tags, date, data corrections) right after
+  // extraction without an extra click.
+  useEffect(() => {
+    if (last?.justCreated && canEdit) {
+      markOpened(last.id);
+      setEditing(true);
+      if (!data) {
+        setLoading(true);
+        metaClient.getRecord(last.id).then((rec) => {
+          setData(rec.data);
+          setDomain((rec.business?.domain as string) ?? '');
+          setTags(((rec.business?.tags as string[]) ?? []).join(', '));
+          setDate((rec.business?.date as string) ?? '');
+          setDocName((rec.data?.document_name as string) ?? (rec.source?.filename as string) ?? '');
+        }).catch(() => {})
+          .finally(() => setLoading(false));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [last?.id, canEdit]);
 
   const save = async (nextData: Record<string, unknown>) => {
     setSaving(true);
@@ -59,7 +84,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       date: date || null,
     };
     try {
-      await metaClient.patchRecord(last.id, { data: nextData, business: biz });
+      await metaClient.patchRecord(last.id, { data: { ...nextData, document_name: docName || null }, business: biz });
       setData(nextData);
       patchSummary(last.id, { status: 'edited' });
       toast('Saved — status: edited', 'success');
@@ -120,6 +145,10 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           {data && !loading && (
             <>
               <div className="flex flex-wrap gap-2">
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Document</label>
+                  <input className="input w-48" value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="e.g. report-aug-2026.pdf" />
+                </div>
                 <div>
                   <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Domain</label>
                   <input className="input w-40" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="e.g. logistics" />

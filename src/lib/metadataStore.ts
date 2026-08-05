@@ -10,6 +10,7 @@ export interface MetaSummary {
   status: string;
   model: string;
   filename: string;
+  justCreated: boolean;
 }
 
 interface MetadataState {
@@ -17,6 +18,7 @@ interface MetadataState {
   add: (s: MetaSummary) => void;
   get: (filename: string | null | undefined) => MetaSummary | null;
   patchSummary: (id: string, patch: Partial<Pick<MetaSummary, 'status'>>) => void;
+  markOpened: (id: string) => void;
   clear: () => void;
   pendingRecordId: string | null;
   openRecord: (id: string) => void;
@@ -45,6 +47,12 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
       const entry = Object.values(state.byFilename).find((e) => e.id === id);
       if (!entry) return state;
       return { byFilename: { ...state.byFilename, [entry.filename]: { ...entry, ...patch } } };
+    }),
+  markOpened: (id) =>
+    set((state) => {
+      const entry = Object.values(state.byFilename).find((e) => e.id === id);
+      if (!entry || !entry.justCreated) return state;
+      return { byFilename: { ...state.byFilename, [entry.filename]: { ...entry, justCreated: false } } };
     }),
   clear: () => set({ byFilename: {} }),
   pendingRecordId: null,
