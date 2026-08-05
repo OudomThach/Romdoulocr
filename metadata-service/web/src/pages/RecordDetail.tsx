@@ -168,15 +168,16 @@ export default function RecordDetail() {
     },
   });
 
-  if (isLoading || !rec) return <div className="p-8 text-slate-500">Loading…</div>;
-
   // Sync local state when record loads
   useEffect(() => {
+    if (!rec) return;
     setLocalDomain((rec.business?.domain as string) ?? '');
     setLocalTags(((rec.business?.tags as string[]) ?? []).join(', '));
     setLocalDate((rec.business?.date as string) ?? '');
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rec.id]);
+  }, [rec?.id]);
+
+  if (isLoading || !rec) return <div className="p-8 text-slate-500">Loading…</div>;
 
   return (
     <div className="p-6 max-w-5xl">
