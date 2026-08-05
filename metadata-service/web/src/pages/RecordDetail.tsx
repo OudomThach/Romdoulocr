@@ -222,6 +222,11 @@ export default function RecordDetail() {
 
       {tab === "data" && (
         <div className="space-y-4">
+          {(rec.source?.thumbnail_base64 as string) && (
+            <div className="flex items-start gap-4 mb-2">
+              <img src={rec.source?.thumbnail_base64 as string} alt="Source" className="h-28 w-28 rounded-lg border border-slate-200 dark:border-white/10 object-cover shrink-0" />
+            </div>
+          )}
           {canEdit && (
             <Section title="Business metadata">
               <div className="flex flex-wrap gap-3">

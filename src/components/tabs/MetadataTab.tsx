@@ -207,7 +207,10 @@ function RecordDetail({
       {tab === 'data' && (
         <div className="space-y-4">
           <div className="panel p-4">
-            <div className="mb-3 flex flex-wrap gap-3">
+            <div className="mb-3 flex flex-wrap items-start gap-4">
+              {(rec.source?.thumbnail_base64 as string) && (
+                <img src={rec.source?.thumbnail_base64 as string} alt="Source preview" className="h-28 w-28 rounded-lg border border-slate-200 object-cover shrink-0" />
+              )}
               <div>
                 <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Domain</label>
                 <input className="input w-44" value={localDomain} onChange={(e) => setLocalDomain(e.target.value)} placeholder="e.g. logistics" />
