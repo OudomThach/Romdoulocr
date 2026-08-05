@@ -28,6 +28,10 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [tags, setTags] = useState('');
   const [date, setDate] = useState('');
   const [docName, setDocName] = useState('');
+  const [owner, setOwner] = useState('');
+  const [category, setCategory] = useState('');
+  const [subCategory, setSubCategory] = useState('');
+  const [desc, setDesc] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +50,10 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setTags(((rec.business?.tags as string[]) ?? []).join(', '));
       setDate((rec.business?.date as string) ?? '');
       setDocName((rec.data?.document_name as string) ?? (rec.source?.filename as string) ?? '');
+      setOwner((rec.business?.owner as string) ?? '');
+      setCategory((rec.business?.category as string) ?? '');
+      setSubCategory((rec.business?.sub_category as string) ?? '');
+      setDesc((rec.business?.description as string) ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load record');
     } finally {
@@ -68,6 +76,10 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           setTags(((rec.business?.tags as string[]) ?? []).join(', '));
           setDate((rec.business?.date as string) ?? '');
           setDocName((rec.data?.document_name as string) ?? (rec.source?.filename as string) ?? '');
+          setOwner((rec.business?.owner as string) ?? '');
+          setCategory((rec.business?.category as string) ?? '');
+          setSubCategory((rec.business?.sub_category as string) ?? '');
+          setDesc((rec.business?.description as string) ?? '');
         }).catch(() => {})
           .finally(() => setLoading(false));
       }
@@ -79,6 +91,10 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     setSaving(true);
     setError(null);
     const biz: Record<string, unknown> = {
+      owner: owner.trim() || null,
+      category: category.trim() || null,
+      sub_category: subCategory.trim() || null,
+      description: desc.trim() || null,
       domain: domain.trim() || null,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       date: date || null,
@@ -150,6 +166,18 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                   <input className="input w-48" value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="e.g. report-aug-2026.pdf" />
                 </div>
                 <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Owner</label>
+                  <input className="input w-40" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="e.g. Oudom" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Category</label>
+                  <input className="input w-36" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. receipt" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sub-category</label>
+                  <input className="input w-36" value={subCategory} onChange={(e) => setSubCategory(e.target.value)} placeholder="e.g. food" />
+                </div>
+                <div>
                   <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Domain</label>
                   <input className="input w-40" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="e.g. logistics" />
                 </div>
@@ -161,6 +189,10 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                   <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Date</label>
                   <input className="input w-36" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notes</label>
+                <textarea className="input min-h-16" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Any notes about this extraction…" rows={2} />
               </div>
               <DataFormEditor key={last.status} data={data} onChange={save} />
             </>

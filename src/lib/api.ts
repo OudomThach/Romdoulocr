@@ -48,13 +48,14 @@ async function postExtraction(payload: {
   type: string;
   source: { filename?: string; model: string };
   data: { filename?: string };
-}): Promise<MetaSummary | null> {
+}, extraHeaders?: Record<string, string>): Promise<MetaSummary | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5_000);
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extraHeaders };
     const res = await fetch(`${METADATA_URL}/api/v1/records`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
@@ -122,10 +123,18 @@ function reportExtraction(
     },
   });
 
-  const doPost = (payload: ReturnType<typeof buildPayload>) =>
-    postExtraction(payload).then((summary) => {
+  const doPost = (payload: ReturnType<typeof buildPayload>) => {
+    // Send the user's session token if signed in, so the metadata record
+    // carries proper attribution (created_by = the person who parsed).
+    const token = (() => {
+      try { return localStorage.getItem('metadata_token'); } catch { return null; }
+    })();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['X-Session-Token'] = token;
+    return postExtraction(payload, headers).then((summary) => {
       if (summary) useMetadataStore.getState().add(summary);
     });
+  };
 
   const tryWithThumbnail = async () => {
     let thumbnail: string | undefined;

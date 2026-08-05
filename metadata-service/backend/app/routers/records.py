@@ -98,8 +98,15 @@ async def create_record(
     payload: schemas.RecordCreate,
     session: AsyncSession = Depends(get_session),
     x_api_key: str | None = Header(default=None),
+    x_session_token: str | None = Header(default=None),
 ) -> models.Record:
-    actor = f"user:{x_api_key}" if x_api_key else "system:api"
+    actor = "system:api"
+    if x_api_key:
+        actor = f"key:{x_api_key}"
+    elif x_session_token:
+        from ..security import user_by_token
+        user = await user_by_token(session, x_session_token)
+        actor = f"user:{user.username}" if user else "system:api"
     now = dt.datetime.now(dt.timezone.utc)
     record_id = payload.id or str(uuid.uuid4())
     exists = (await session.execute(select(func.count()).select_from(models.Record).where(models.Record.id == record_id))).scalar()

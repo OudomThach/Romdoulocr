@@ -8,7 +8,7 @@ async def test_create_record_returns_201_with_envelope(auth_client):
     body = r.json()
     assert body["id"] == "rec-0001"
     assert body["status"] == "raw"
-    assert body["created_by"] == "system:api"
+    assert body["created_by"] == "user:admin"
     assert body["audit"]["status"] == "raw"
     assert body["record"]["validation"]["status"] == "accepted"
     assert body["data"]["order_no"] == "INV-2201"
@@ -117,7 +117,7 @@ async def test_record_history_endpoint(auth_client):
     events = r.json()
     assert len(events) == 2
     assert events[0]["action"] == "create"
-    assert events[0]["actor"] == "system:api"
+    assert events[0]["actor"] == "user:admin"
     assert events[1]["action"] == "update"
     assert events[1]["actor"] == "user:admin"
     assert "snapshot" in events[0]
