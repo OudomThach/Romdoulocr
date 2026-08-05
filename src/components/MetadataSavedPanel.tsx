@@ -42,6 +42,31 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Auto-expand the fill-in form on freshly-extracted records so users can
+  // complete the metadata right after extraction without an extra click.
+  // MUST be before the conditional return — React hooks are positional.
+  useEffect(() => {
+    if (!last || !last.justCreated || !canEdit) return;
+    markOpened(last.id);
+    setEditing(true);
+    if (!data) {
+      setLoading(true);
+      metaClient.getRecord(last.id).then((rec) => {
+        setData(rec.data);
+        setDomain((rec.business?.domain as string) ?? '');
+        setTags(((rec.business?.tags as string[]) ?? []).join(', '));
+        setDate((rec.business?.date as string) ?? '');
+        setDocName((rec.data?.document_name as string) ?? (rec.source?.filename as string) ?? '');
+        setOwner((rec.business?.owner as string) ?? '');
+        setTitle((rec.business?.title as string) ?? '');
+        setOrg((rec.business?.organization as string) ?? '');
+        setLocation((rec.business?.location as string) ?? '');
+      }).catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [last?.id, canEdit]);
+
   if (!last) return null;
 
   const startEdit = async () => {
@@ -72,38 +97,6 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setLoading(false);
     }
   };
-
-  // Auto-expand the fill-in form on freshly-extracted records so users can
-  // complete the metadata (domain, tags, date, data corrections) right after
-  // extraction without an extra click.
-  useEffect(() => {
-    if (last?.justCreated && canEdit) {
-      markOpened(last.id);
-      setEditing(true);
-      if (!data) {
-        setLoading(true);
-        metaClient.getRecord(last.id).then((rec) => {
-          setData(rec.data);
-          setDomain((rec.business?.domain as string) ?? '');
-          setTags(((rec.business?.tags as string[]) ?? []).join(', '));
-          setDate((rec.business?.date as string) ?? '');
-          setDocName((rec.data?.document_name as string) ?? (rec.source?.filename as string) ?? '');
-          setOwner((rec.business?.owner as string) ?? '');
-          setCategory((rec.business?.category as string) ?? '');
-          setSubCategory((rec.business?.sub_category as string) ?? '');
-          setDesc((rec.business?.description as string) ?? '');
-          setPublished(Boolean(rec.business?.published));
-          setCopyright(Boolean(rec.business?.copyright));
-          setTitle((rec.business?.title as string) ?? '');
-          setOrg((rec.business?.organization as string) ?? '');
-          setLocation((rec.business?.location as string) ?? '');
-          setImageUrl((rec.data?.image_url as string) ?? '');
-        }).catch(() => {})
-          .finally(() => setLoading(false));
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [last?.id, canEdit]);
 
   const save = async (nextData: Record<string, unknown>) => {
     setSaving(true);
