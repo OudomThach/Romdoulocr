@@ -32,6 +32,8 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [category, setCategory] = useState('');
   const [subCategory, setSubCategory] = useState('');
   const [desc, setDesc] = useState('');
+  const [published, setPublished] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +56,8 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setCategory((rec.business?.category as string) ?? '');
       setSubCategory((rec.business?.sub_category as string) ?? '');
       setDesc((rec.business?.description as string) ?? '');
+      setPublished(Boolean(rec.business?.published));
+      setImageUrl((rec.data?.image_url as string) ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load record');
     } finally {
@@ -80,6 +84,8 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           setCategory((rec.business?.category as string) ?? '');
           setSubCategory((rec.business?.sub_category as string) ?? '');
           setDesc((rec.business?.description as string) ?? '');
+          setPublished(Boolean(rec.business?.published));
+          setImageUrl((rec.data?.image_url as string) ?? '');
         }).catch(() => {})
           .finally(() => setLoading(false));
       }
@@ -98,9 +104,16 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       domain: domain.trim() || null,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       date: date || null,
+      published: published || null,
+      published_at: published ? new Date().toISOString() : null,
+    };
+    const extras: Record<string, unknown> = {
+      ...nextData,
+      document_name: docName || null,
+      image_url: imageUrl || null,
     };
     try {
-      await metaClient.patchRecord(last.id, { data: { ...nextData, document_name: docName || null }, business: biz });
+      await metaClient.patchRecord(last.id, { data: extras, business: biz });
       setData(nextData);
       patchSummary(last.id, { status: 'edited' });
       toast('Saved — status: edited', 'success');
@@ -193,6 +206,23 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
               <div>
                 <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notes</label>
                 <textarea className="input min-h-16" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Any notes about this extraction…" rows={2} />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPublished((p) => !p)}
+                  className="flex items-center gap-2"
+                  aria-pressed={published}
+                >
+                  <span className={`h-5 w-9 rounded-full p-0.5 transition-colors ${published ? 'bg-accent' : 'bg-slate-300'}`}>
+                    <span className={`block h-4 w-4 rounded-full bg-white shadow transition-transform ${published ? 'translate-x-4' : ''}`} />
+                  </span>
+                  <span className="text-sm text-slate-700">{published ? 'Published' : 'Not published'}</span>
+                </button>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Image URL</label>
+                  <input className="input w-48" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" />
+                </div>
               </div>
               <DataFormEditor key={last.status} data={data} onChange={save} />
             </>
