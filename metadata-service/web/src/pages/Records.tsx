@@ -80,47 +80,40 @@ export default function Records() {
         <table className="w-full">
           <thead className="border-b border-slate-200 bg-slate-50/60 dark:bg-white/5">
             <tr>
+              <th className="th w-48">Document</th>
               <th className="th">Type</th>
+              <th className="th">Model</th>
               <th className="th">Status</th>
-              <th className="th">Domain</th>
-              <th className="th">Business date</th>
-              <th className="th">Tags</th>
-              <th className="th">Created</th>
+              <th className="th">Date</th>
               <th className="th">Edited</th>
-              <th className="th">Source</th>
             </tr>
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td className="td text-slate-500" colSpan={8}>Loading…</td></tr>
+              <tr><td className="td text-slate-500" colSpan={6}>Loading…</td></tr>
             )}
             {page?.items.length === 0 && (
-              <tr><td className="td text-slate-500" colSpan={8}>No records match the filters.</td></tr>
+              <tr><td className="td text-slate-500" colSpan={6}>No records match the filters.</td></tr>
             )}
-            {page?.items.map((r) => (
+            {page?.items.map((r) => {
+              const docName = (r.data?.document_name as string) || (r.source?.filename as string) || '—';
+              return (
               <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60 dark:border-white/5 dark:hover:bg-white/5">
-                <td className="td">
-                  <Link to={`/records/${r.id}`} className="font-medium text-accent hover:underline dark:drop-shadow-[0_0_6px_rgba(0,229,255,0.5)]">
-                    {r.type}
+                <td className="td max-w-52 truncate font-medium text-slate-900 dark:text-slate-100" title={docName}>
+                  <Link to={`/records/${r.id}`} className="text-accent hover:underline dark:drop-shadow-[0_0_6px_rgba(0,229,255,0.5)]">
+                    {docName}
                   </Link>
                 </td>
+                <td className="td text-slate-600 dark:text-slate-300">{r.type}</td>
+                <td className="td text-slate-500">{r.source_model ?? '—'}</td>
                 <td className="td"><StatusBadge status={r.status} /></td>
-                <td className="td text-slate-600 dark:text-slate-300">{r.domain ?? "—"}</td>
-                <td className="td text-slate-500">{r.business_date ?? "—"}</td>
-                <td className="td">
-                  <div className="flex flex-wrap gap-1">
-                    {r.tags?.map((tag) => (
-                      <span key={tag} className="chip">{tag}</span>
-                    )) ?? "—"}
-                  </div>
-                </td>
-                <td className="td text-slate-500">{r.created_at?.slice(0, 10)}</td>
+                <td className="td text-slate-500">{r.business_date ?? r.created_at?.slice(0, 10) ?? '—'}</td>
                 <td className="td text-slate-500">
-                  {r.edit_count > 0 ? `×${r.edit_count} ${r.edited_at?.slice(0, 10) ?? ""}` : "—"}
+                  {r.edit_count > 0 ? `×${r.edit_count} ${r.edited_at?.slice(0, 10) ?? ''}` : '—'}
                 </td>
-                <td className="td text-slate-500 truncate max-w-[180px]">{r.source_model ?? r.source_system ?? "—"}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

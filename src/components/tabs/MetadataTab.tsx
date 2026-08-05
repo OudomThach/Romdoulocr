@@ -410,14 +410,14 @@ export function MetadataTab() {
             </button>
           </div>
         )}
-        <table className="w-full">
+          <table className="w-full">
           <thead className="border-b border-slate-200 bg-slate-50/60">
             <tr>
+              <th className="th w-48">Document</th>
               <th className="th">Type</th>
-              <th className="th">Status</th>
               <th className="th">Model</th>
+              <th className="th">Status</th>
               <th className="th">Date</th>
-              <th className="th">Created</th>
               <th className="th">Edited</th>
             </tr>
           </thead>
@@ -434,22 +434,27 @@ export function MetadataTab() {
                 </td>
               </tr>
             )}
-            {page?.items.map((r) => (
+            {page?.items.map((r) => {
+              const docName = (r.data?.document_name as string) || (r.source?.filename as string) || '—';
+              return (
               <tr
                 key={r.id}
                 className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50/60"
                 onClick={() => setSelected(r)}
               >
-                <td className="td font-medium text-accent">{r.type}</td>
+                <td className="td max-w-52 truncate font-medium text-slate-900" title={docName}>
+                  {docName}
+                </td>
+                <td className="td text-slate-600">{r.type}</td>
+                <td className="td text-slate-500">{r.source_model ?? '—'}</td>
                 <td className="td"><StatusBadge status={r.status} /></td>
-                <td className="td text-slate-600">{r.source_model ?? '—'}</td>
-                <td className="td text-slate-500">{r.business_date ?? '—'}</td>
-                <td className="td text-slate-500">{r.created_at?.slice(0, 10)}</td>
+                <td className="td text-slate-500">{r.business_date ?? r.created_at?.slice(0, 10) ?? '—'}</td>
                 <td className="td text-slate-500">
                   {r.edit_count > 0 ? `×${r.edit_count} ${r.edited_at?.slice(0, 10) ?? ''}` : '—'}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
