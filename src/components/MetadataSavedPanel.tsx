@@ -8,12 +8,9 @@ import { useSettingsStore } from '@/hooks/useSettingsStore';
 import { useToastStore } from '@/hooks/useToastStore';
 
 /**
- * Inline "Metadata saved" panel shown in a tab's results area after a parse.
- * Only renders when the saved record's filename matches the displayed result.
- *
- * "Edit" expands an inline form right here — no tab hopping — so the user can
- * fix the generated data immediately. Saving PATCHes the record (audit stamps
- * the user, status → edited). "Open full record" jumps to the Metadata tab.
+ * Inline panel after a parse: shows saved status + [Edit] to expand a dynamic
+ * editor right here. Edit the extraction data AND the business metadata
+ * (domain, tags, date) — no tab hopping. Saving PATCHes both at once.
  */
 export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const last = useMetadataStore((s) => s.get(filename ?? null));
@@ -25,6 +22,9 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [domain, setDomain] = useState('');
+  const [tags, setTags] = useState('');
+  const [date, setDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,13 +32,16 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   if (!last) return null;
 
   const startEdit = async () => {
-    setEditing(true);
-    setError(null);
-    if (data) return;
+    setEditing(!editing);
+    if (editing || data) return;
     setLoading(true);
+    setError(null);
     try {
       const rec = await metaClient.getRecord(last.id);
       setData(rec.data);
+      setDomain((rec.business?.domain as string) ?? '');
+      setTags(((rec.business?.tags as string[]) ?? []).join(', '));
+      setDate((rec.business?.date as string) ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load record');
     } finally {
@@ -46,12 +49,17 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     }
   };
 
-  const save = async (next: Record<string, unknown>) => {
+  const save = async (nextData: Record<string, unknown>) => {
     setSaving(true);
     setError(null);
+    const biz: Record<string, unknown> = {
+      domain: domain.trim() || null,
+      tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+      date: date || null,
+    };
     try {
-      await metaClient.patchRecord(last.id, { data: next });
-      setData(next);
+      await metaClient.patchRecord(last.id, { data: nextData, business: biz });
+      setData(nextData);
       patchSummary(last.id, { status: 'edited' });
       toast('Saved — status: edited', 'success');
       setEditing(false);
@@ -89,7 +97,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
         <div className="flex flex-wrap items-center gap-2">
           {signedIn ? (
             <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => void startEdit()} disabled={saving}>
-              {editing ? 'Close editor' : 'Edit'}
+              {editing ? 'Close' : 'Edit'}
             </button>
           ) : (
             <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setLoginOpen(true)}>
@@ -97,23 +105,33 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
             </button>
           )}
           <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={openFull}>
-            Open full record
+            Full record
           </button>
         </div>
       </div>
 
       {editing && (
-        <div className="border-t border-slate-200 bg-white/60 px-4 py-3">
+        <div className="border-t border-slate-200 bg-white/60 px-4 py-3 space-y-3">
           {loading && <p className="text-sm text-slate-500">Loading…</p>}
-          {error && <p className="mb-2 text-sm text-red-500">{error}</p>}
+          {error && <p className="text-sm text-red-500">{error}</p>}
           {data && !loading && (
-            <DataFormEditor
-              key={last.status}
-              data={data}
-              onChange={(d) => {
-                void save(d);
-              }}
-            />
+            <>
+              <div className="flex flex-wrap gap-2">
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Domain</label>
+                  <input className="input w-40" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="e.g. logistics" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tags</label>
+                  <input className="input w-48" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="import, warehouse" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Date</label>
+                  <input className="input w-36" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                </div>
+              </div>
+              <DataFormEditor key={last.status} data={data} onChange={save} />
+            </>
           )}
         </div>
       )}
