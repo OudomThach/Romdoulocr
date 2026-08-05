@@ -1,11 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState } from "react";
 
 // Fully dynamic field editor for a record's `data` object.
-// - Rename fields: click the key label → inline input, Enter/Blur to confirm
-// - Change types: per-row dropdown (text / number / yes-no / object list)
-//   with smart value conversion
-// - Add/remove fields freely
-// - Power-user JSON toggle with live validation
+// - Rename fields, change types, add/remove freely
+// - Changes preview: shows what fields will change before saving
+// - Form / JSON toggle for power users
 
 type FieldType = 'string' | 'number' | 'boolean' | 'json';
 
@@ -49,7 +47,8 @@ export default function DataFormEditor({
   data: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
 }) {
-  const [jsonMode, setJsonMode] = useState(false);
+  const [viewMode, setViewMode] = useState<'form' | 'table' | 'json'>('form');
+  const [showPreview, setShowPreview] = useState(false);
   const [jsonText, setJsonText] = useState<string>(() => JSON.stringify(data, null, 2));
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [fields, setFields] = useState<Field[]>(() =>
@@ -74,7 +73,38 @@ export default function DataFormEditor({
   }, [fields]);
 
   const keys = useMemo(() => fields.map((f) => f.key), [fields]);
-  const valid = Object.keys(fieldErrors).length === 0 && (!jsonMode || !jsonError);
+  const valid = Object.keys(fieldErrors).length === 0 && (viewMode === 'json' ? !jsonError : true);
+
+  // ── changes preview ────────────────
+  const changes = useMemo(() => {
+    const result: { key: string; was: unknown; now: unknown; action: 'changed' | 'added' | 'removed' }[] = [];
+    const originalKeys = Object.keys(data);
+    const currentKeys = fields.map((f) => f.key);
+
+    // changed / removed
+    for (const k of originalKeys) {
+      const orig = data[k];
+      const curr = fields.find((f) => f.key === k);
+      if (!curr) {
+        result.push({ key: k, was: orig, now: null, action: 'removed' });
+      } else {
+        const built = curr.type === 'number' ? Number(curr.value) : curr.type === 'boolean' ? curr.value === 'true' : curr.value;
+        const builtStr = JSON.stringify(built), origStr = JSON.stringify(orig);
+        if (builtStr !== origStr) {
+          result.push({ key: k, was: orig, now: built, action: 'changed' });
+        }
+      }
+    }
+    // added
+    for (const k of currentKeys) {
+      if (!originalKeys.includes(k)) {
+        const f = fields.find((f) => f.key === k)!;
+        const built = f.type === 'number' ? Number(f.value) : f.type === 'boolean' ? f.value === 'true' : f.value;
+        result.push({ key: k, was: null, now: built, action: 'added' });
+      }
+    }
+    return result;
+  }, [data, fields]);
 
   const updateField = (key: string, patch: Partial<Field>) =>
     setFields((fs) => fs.map((f) => (f.key === key ? { ...f, ...patch } : f)));
@@ -84,10 +114,7 @@ export default function DataFormEditor({
     setErrors((e) => { const n = { ...e }; delete n[key]; return n; });
   };
 
-  const startRename = (key: string) => {
-    setRenameKey(key);
-    setRenameValue(key);
-  };
+  const startRename = (key: string) => { setRenameKey(key); setRenameValue(key); };
 
   const confirmRename = () => {
     if (!renameKey || !renameValue.trim()) return;
@@ -110,12 +137,11 @@ export default function DataFormEditor({
       return;
     }
     setFields((fs) => [...fs, { key, type: newType, value: newValue }]);
-    setNewKey('');
-    setNewValue('');
+    setNewKey(''); setNewValue('');
   };
 
   const buildData = (): Record<string, unknown> | null => {
-    if (jsonMode) {
+    if (viewMode === 'json') {
       if (jsonError) return null;
       try { return JSON.parse(jsonText) as Record<string, unknown>; } catch { setJsonError('Invalid JSON'); return null; }
     }
@@ -129,21 +155,86 @@ export default function DataFormEditor({
     return out;
   };
 
+  // csv renderer
+  const csvRows = useMemo(() => {
+    const rows = [["Field", "Type", "Value"]];
+    for (const f of fields) {
+      rows.push([f.key, f.type, f.value]);
+    }
+    return rows;
+  }, [fields]);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
-          <button type="button" onClick={() => setJsonMode(false)} className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${!jsonMode ? 'bg-slate-100 text-slate-950' : 'text-slate-500'}`}>Form</button>
-          <button type="button" onClick={() => setJsonMode(true)} className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${jsonMode ? 'bg-slate-100 text-slate-950' : 'text-slate-500'}`}>JSON</button>
+          <button type="button" onClick={() => { setViewMode('form'); }} className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'form' ? 'bg-slate-100 text-slate-950' : 'text-slate-500'}`}>Form</button>
+          <button type="button" onClick={() => { setViewMode('table'); }} className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'table' ? 'bg-slate-100 text-slate-950' : 'text-slate-500'}`}>Table</button>
+          <button type="button" onClick={() => { setViewMode('json'); }} className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'json' ? 'bg-slate-100 text-slate-950' : 'text-slate-500'}`}>JSON</button>
         </div>
-        {Object.keys(fieldErrors).length > 0 && <span className="text-xs text-red-500">Fix field error(s)</span>}
+        <div className="flex items-center gap-2">
+          {Object.keys(fieldErrors).length > 0 && <span className="text-xs text-red-500">Fix field error(s)</span>}
+          {changes.length > 0 && (
+            <button type="button" className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${showPreview ? 'bg-accent2/10 text-accent2' : 'bg-slate-100 text-slate-600 hover:text-slate-950'}`}
+              onClick={() => setShowPreview(!showPreview)}>
+              {showPreview ? 'Hide changes' : `Changes (${changes.length})`}
+            </button>
+          )}
+        </div>
       </div>
 
-      {jsonMode ? (
+      {/* changes preview */}
+      {showPreview && changes.length > 0 && (
+        <div className="rounded-lg border border-accent2/30 bg-accent2/5 px-3 py-2">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-accent2">Changes preview</div>
+          <div className="space-y-1">
+            {changes.map((ch) => (
+              <div key={ch.key} className="flex items-center gap-2 text-xs">
+                <span className={`badge border-transparent ${ch.action === 'added' ? 'bg-emerald-500/10 text-emerald-600' : ch.action === 'removed' ? 'bg-red-500/10 text-red-500' : 'bg-amber-500/10 text-amber-600'}`}>
+                  {ch.action === 'added' ? '+' : ch.action === 'removed' ? '−' : '~'}
+                </span>
+                <code className="font-mono text-slate-700">{ch.key}</code>
+                {ch.action === 'changed' && (
+                  <span className="text-slate-500">
+                    <span className="text-red-500 line-through">{trunc(JSON.stringify(ch.was))}</span>
+                    {' → '}
+                    <span className="text-emerald-600">{trunc(JSON.stringify(ch.now))}</span>
+                  </span>
+                )}
+                {ch.action === 'added' && <span className="text-emerald-600">{trunc(JSON.stringify(ch.now))}</span>}
+                {ch.action === 'removed' && <span className="text-red-500 line-through">{trunc(JSON.stringify(ch.was))}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {viewMode === 'json' ? (
         <div>
           <textarea className="input min-h-64 font-mono text-xs" value={jsonText}
             onChange={(e) => { setJsonText(e.target.value); try { JSON.parse(e.target.value); setJsonError(null); } catch { setJsonError('Invalid JSON'); } }} spellCheck={false} />
           {jsonError && <p className="mt-1 text-xs text-red-500">{jsonError}</p>}
+        </div>
+      ) : viewMode === 'table' ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                {csvRows[0].map((h, i) => <th key={i} className="px-2 py-1.5 text-left font-semibold text-slate-600">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {csvRows.slice(1).map((r, ri) => (
+                <tr key={ri} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  {r.map((c, ci) => (
+                    <td key={ci} className={`px-2 py-1.5 font-mono whitespace-pre-wrap max-w-xs truncate ${ci === 0 ? 'text-slate-700 font-medium' : 'text-slate-500'}`}>
+                      {c}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="space-y-2">
@@ -215,8 +306,12 @@ export default function DataFormEditor({
       )}
 
       <div className="flex justify-end gap-2 pt-1">
-        <button type="button" className="btn-primary" onClick={() => { const n = buildData(); if (n) onChange(n); }} disabled={!valid}>Save changes</button>
+        <button type="button" className="btn-primary" onClick={() => { const n = buildData(); if (n) onChange(n); }} disabled={!valid}>
+          Save changes
+        </button>
       </div>
     </div>
   );
 }
+
+function trunc(s: string, max = 40) { return s.length > max ? s.slice(0, max) + '…' : s; }

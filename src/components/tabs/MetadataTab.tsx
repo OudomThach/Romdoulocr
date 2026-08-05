@@ -24,6 +24,16 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function formatVal(v: unknown): string {
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v)) {
+    try {
+      const d = new Date(v);
+      return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch { return String(v); }
+  }
+  return typeof v === 'object' ? JSON.stringify(v) : String(v);
+}
+
 function KV({ obj }: { obj: Record<string, unknown> | null | undefined }) {
   if (!obj || Object.keys(obj).length === 0) return <div className="text-xs text-slate-500">—</div>;
   const skip = new Set(['thumbnail_base64']);
@@ -32,7 +42,7 @@ function KV({ obj }: { obj: Record<string, unknown> | null | undefined }) {
       {Object.entries(obj).filter(([k]) => !skip.has(k)).map(([k, v]) => (
         <div key={k} className="contents">
           <dt className="text-xs text-slate-500 break-all">{k}</dt>
-          <dd className="text-sm text-slate-700 break-all">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</dd>
+          <dd className="text-sm text-slate-700 break-all">{formatVal(v)}</dd>
         </div>
       ))}
     </dl>
