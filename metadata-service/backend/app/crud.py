@@ -117,6 +117,9 @@ async def stats(session: AsyncSession) -> dict[str, Any]:
     by_domain = dict(
         (await session.execute(select(models.Record.domain, func.count()).where(models.Record.domain.is_not(None)).group_by(models.Record.domain))).all()
     )
+    by_model = dict(
+        (await session.execute(select(models.Record.source_model, func.count()).where(models.Record.source_model.is_not(None)).group_by(models.Record.source_model))).all()
+    )
     edited = (await session.execute(select(func.count()).select_from(models.Record).where(models.Record.edit_count > 0))).scalar() or 0
     verified = by_status.get("verified", 0)
     coverage_avg = (await session.execute(select(func.avg(models.Record.coverage)).where(models.Record.coverage.is_not(None)))).scalar()
@@ -132,6 +135,9 @@ async def stats(session: AsyncSession) -> dict[str, Any]:
         "total": total,
         "by_status": {k: int(v) for k, v in by_status.items()},
         "by_type": {k: int(v) for k, v in by_type.items()},
+        "by_domain": {k: int(v) for k, v in by_domain.items()},
+        "by_model": {k or "unknown": int(v) for k, v in by_model.items()},
+        "by_domain": {k: int(v) for k, v in by_domain.items()},
         "by_domain": {k: int(v) for k, v in by_domain.items()},
         "edited": int(edited),
         "verified": int(verified),

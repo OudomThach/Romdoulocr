@@ -1,3 +1,4 @@
+import asyncio
 import datetime as dt
 import uuid
 
@@ -9,6 +10,7 @@ from .. import crud, models, schemas
 from ..db import get_session
 from ..errors import APIError
 from ..security import Actor, require_auth
+from .webhooks import fire_webhooks
 
 # POST /records is deliberately OPEN so extraction pipelines can record from
 # anywhere without shipping a key in a public bundle (idempotent via client id,
@@ -120,6 +122,7 @@ async def create_record(
     await session.flush()  # assign rec.id before the FK-referencing audit row
     await crud.log_audit(session, record_id, "create", actor, envelope)
     await session.commit()
+    asyncio.create_task(fire_webhooks(record_id, "create", envelope))
     await session.refresh(rec)
     return crud.to_out(rec)
 
@@ -172,6 +175,35 @@ async def get_record(record_id: str, session: AsyncSession = Depends(get_session
     if not rec:
         raise APIError(404, "not_found", f"record {record_id} not found")
     return crud.to_out(rec)
+
+
+@router.delete("", response_model=dict)
+async def bulk_delete_records(
+    session: AsyncSession = Depends(get_session),
+    _actor: Actor = Depends(require_auth),
+    type: str | None = Query(default=None),
+    domain: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    created_before: dt.datetime | None = Query(default=None),
+) -> dict:
+    if _actor.role != "admin":
+        raise APIError(403, "forbidden", "Admin role required")
+    stmt = crud.apply_filters(
+        select(models.Record),
+        dialect=session.get_bind().dialect.name,
+        type=type, domain=domain, status=status, tag=tag,
+        business_from=None, business_to=None,
+        created_from=None, created_to=created_before,
+        q=None,
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    count = len(rows)
+    for r in rows:
+        await crud.log_audit(session, r.id, "delete", _actor.label(), r.envelope or {})
+        await session.delete(r)
+    await session.commit()
+    return {"deleted": count}
 
 
 @router.get("/{record_id}/history", response_model=list[schemas.AuditEventOut])
@@ -248,6 +280,7 @@ async def patch_record(
     _apply_envelope(rec, env)
     await crud.log_audit(session, record_id, "update", actor, env)
     await session.commit()
+    asyncio.create_task(fire_webhooks(record_id, "update", env))
     await session.refresh(rec)
     return crud.to_out(rec)
 
@@ -267,3 +300,4 @@ async def delete_record(
     await crud.log_audit(session, record_id, "delete", actor, rec.envelope or {})
     await session.delete(rec)
     await session.commit()
+    asyncio.create_task(fire_webhooks(record_id, "delete", rec.envelope or {}))

@@ -34,6 +34,7 @@ export interface Stats {  total: number;
   by_status: Record<string, number>;
   by_type: Record<string, number>;
   by_domain: Record<string, number>;
+  by_model: Record<string, number>;
   edited: number;
   verified: number;
   coverage_avg: number | null;

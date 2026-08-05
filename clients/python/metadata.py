@@ -307,3 +307,122 @@ def airflow_metadata_connection(
     user = username or os.getenv("ROMDOUL_META_USER")
     pw = password or os.getenv("ROMDOUL_META_PASS")
     return MetadataClient(user, pw, base_url=url)
+
+
+# ─── Async variant (aiohttp) ────────────────────────────────────────────────
+
+class AsyncMetadataClient:
+    """aiohttp-based async variant for high-throughput Airflow DAGs / asyncio apps.
+
+    Usage::
+
+        from metadata import AsyncMetadataClient
+
+        async with AsyncMetadataClient("admin", "pass") as c:
+            stats = await c.stats()
+            recs = await c.list_records(page_size=50)
+    """
+
+    def __init__(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        base_url: str = "https://romdoulocr.netlify.app/api-meta",
+    ) -> None:
+        try:
+            import aiohttp
+        except ImportError:
+            raise ImportError("aiohttp is required for AsyncMetadataClient: pip install aiohttp") from None
+        self.base_url = base_url.rstrip("/")
+        self._token: str | None = None
+        self._session: aiohttp.ClientSession | None = None
+        self._creds = (username, password)
+
+    async def __aenter__(self):
+        import aiohttp
+        self._session = aiohttp.ClientSession(headers={"Content-Type": "application/json"})
+        if self._creds[0] and self._creds[1]:
+            await self.login(self._creds[0], self._creds[1])
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        if self._session:
+            await self._session.close()
+
+    async def _request(self, method: str, path: str, body: dict | None = None, params: dict | None = None, timeout: int = 30) -> Any:
+        import aiohttp
+        if not self._session:
+            raise RuntimeError("Use 'async with AsyncMetadataClient(...)' or call open() first")
+        headers: dict = {}
+        if self._token:
+            headers["X-Session-Token"] = self._token
+        url = f"{self.base_url}/api/v1{path}"
+        kwargs: dict = dict(method=method, url=url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout))
+        if params:
+            kwargs["params"] = {k: v for k, v in params.items() if v is not None and v != ""}
+        if body is not None:
+            kwargs["json"] = body
+        for attempt in range(2):
+            try:
+                async with self._session.request(**kwargs) as resp:
+                    if resp.status >= 500 and attempt == 0:
+                        import asyncio
+                        await asyncio.sleep(1.5 * (attempt + 1))
+                        continue
+                    if resp.status >= 400:
+                        try:
+                            err = await resp.json()
+                        except Exception:
+                            err = {}
+                        _bail(resp.status, err)
+                    if resp.status == 204:
+                        return None
+                    return await resp.json()
+            except aiohttp.ClientError as exc:
+                if attempt == 0:
+                    import asyncio
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                raise MetadataError(0, str(exc)) from exc
+
+    async def login(self, username: str, password: str) -> dict:
+        resp = await self._request("POST", "/auth/login", body={"username": username, "password": password})
+        self._token = resp.get("token")
+        return resp
+
+    async def health(self) -> dict:
+        async with self._session.get(f"{self.base_url}/health", timeout=aiohttp.ClientTimeout(10)) as resp:
+            return await resp.json()
+
+    async def stats(self) -> dict: return await self._request("GET", "/stats")
+
+    async def list_records(self, **filters: Any) -> dict:
+        return await self._request("GET", "/records", params={k: v for k, v in filters.items() if v is not None})
+
+    async def get_record(self, record_id: str) -> dict:
+        return await self._request("GET", f"/records/{record_id}")
+
+    async def create_record(self, payload: dict) -> dict:
+        return await self._request("POST", "/records", body=payload)
+
+    async def patch_record(self, record_id: str, *, data: dict | None = None, business: dict | None = None, status: str | None = None) -> dict:
+        body: dict = {}
+        if data is not None: body["data"] = data
+        if business is not None: body["business"] = business
+        if status is not None: body["status"] = status
+        return await self._request("PATCH", f"/records/{record_id}", body=body)
+
+    async def delete_record(self, record_id: str) -> None:
+        await self._request("DELETE", f"/records/{record_id}")
+
+    async def record_history(self, record_id: str) -> list:
+        return await self._request("GET", f"/records/{record_id}/history")
+
+    async def list_users(self) -> list:
+        return await self._request("GET", "/auth/users")
+
+    async def create_user(self, username: str, password: str, role: str = "viewer") -> dict:
+        return await self._request("POST", "/auth/users", body={"username": username, "password": password, "role": role})
+
+    async def export_json(self, **filters: Any) -> list:
+        return await self._request("GET", "/export", params={"format": "json", **{k: v for k, v in filters.items() if v is not None}})

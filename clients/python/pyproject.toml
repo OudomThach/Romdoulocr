@@ -1,0 +1,26 @@
+[project]
+name = "romdoul-client"
+version = "1.0.0"
+description = "Python clients for the Romdoul OCR and Metadata APIs"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.28",
+]
+authors = [
+    { name = "Romdoul OCR" },
+]
+readme = "README.md"
+license = { text = "Proprietary" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+async = ["aiohttp>=3.9"]
+pdf = ["pypdf>=4"]
+
+[tool.uv]
+dev-dependencies = []

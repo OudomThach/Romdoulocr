@@ -78,6 +78,19 @@ export default function Dashboard() {
           </div>
         </div>
 
+        <div className="panel p-5">
+          <div className="mb-3 text-sm font-semibold text-slate-950 dark:text-slate-100">By model</div>
+          <div className="flex flex-wrap gap-4">
+            {Object.entries(stats.by_model ?? {}).map(([m, count]) => (
+              <div key={m} className="flex items-center gap-2">
+                <span className={`h-3 w-3 rounded-full ${m === 'default' ? 'bg-accent' : m === 'vllm' ? 'bg-accent2' : 'bg-emerald-500'}`} />
+                <span className="text-sm text-slate-700 dark:text-slate-200">{m}</span>
+                <span className="text-sm font-semibold text-slate-950 dark:text-slate-100">{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="panel p-5 md:col-span-2">
           <div className="mb-3 text-sm font-semibold text-slate-950 dark:text-slate-100">Last 14 days</div>
           <div className="flex items-end gap-2 h-28">

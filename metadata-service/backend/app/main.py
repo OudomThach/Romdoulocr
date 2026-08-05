@@ -10,7 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import cors_list, settings
 from .errors import APIError, api_error_handler, http_exception_handler, validation_error_handler
-from .routers import auth, export, health, records, stats
+from .routers import auth, export, health, records, stats, webhooks
 from .security import seed_admin
 
 
@@ -40,6 +40,7 @@ app.include_router(auth.router)
 app.include_router(records.router)
 app.include_router(export.router)
 app.include_router(stats.router)
+app.include_router(webhooks.router)
 
 
 @app.middleware("http")
