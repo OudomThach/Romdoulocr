@@ -48,6 +48,83 @@ cuts requests off at ~26 s and real OCR pages take longer.
 | `text_of(document_result)` | plain text, handling the `full_text` gotcha |
 | `with_engine("vllm")` | sibling client on another engine |
 
+## Metadata client
+
+`metadata.py` — same philosophy (stdlib + requests, one file). Covers the
+extraction-records API. Copy it next to `romdoul.py`.
+
+```python
+from metadata import MetadataClient
+
+c = MetadataClient("admin", "romdoul-v1cgt5jkq492dhzymlwr")
+
+# Browse
+c.health()                              # liveness + DB check
+c.stats()                               # aggregates by status/type/domain
+c.list_records(type="document", page_size=50, sort="created_at:desc")
+c.get_record("id")                      # full envelope + data
+c.record_history("id")                  # audit trail (who/what/when)
+
+# Edit (admin/editor role needed)
+c.patch_record("id", data={"price": 12}, business={"domain": "retail"})
+
+# Ingest (POST /records is OPEN — no auth needed)
+c.create_record({"type": "invoice", "source": {"filename": "inv.pdf", "model": "vllm"}, "data": {...}})
+
+# Export
+c.export_csv("out.csv", domain="logistics")
+c.export_json(type="document")
+
+# User management (admin only)
+c.create_user("dara", "pass", role="editor")
+c.list_users()
+c.update_user(42, role="admin")
+```
+
+### Quick smoke test (no OCR needed, 2 seconds)
+
+```bash
+python smoke_test.py
+```
+
+## Airflow integration
+
+Four ready-to-copy DAGs in `airflow_examples.py`:
+
+| DAG | What |
+|---|---|
+| `romdoul_daily_export` | @daily — export yesterday's records to CSV |
+| `romdoul_health_check` | @5min — check metadata + all OCR engines are alive |
+| `romdoul_ocr_to_metadata` | manual — OCR a list of documents, POST each result to the metadata service |
+| `romdoul_weekly_report` | @weekly — stats summary |
+
+### Setup (2 minutes)
+
+1. Copy `metadata.py`, `romdoul.py`, and `airflow_examples.py` into your Airflow `dags/` folder
+2. Set Airflow Variables:
+   ```
+   ROMDOUL_META_USER=admin
+   ROMDOUL_META_PASS=romdoul-v1cgt5jkq492dhzymlwr
+   ROMDOUL_META_URL=https://romdoulocr.netlify.app/api-meta
+   ```
+3. Enable the wanted DAGs in the Airflow UI
+
+### Without Airflow — the same client works anywhere
+
+```python
+# Jupyter notebook
+from metadata import MetadataClient
+c = MetadataClient("admin", "romdoul-v1cgt5jkq492dhzymlwr")
+df = pd.DataFrame(c.export_json(type="document"))
+
+# cron job
+# */5 * * * * python -c "from metadata import MetadataClient; MetadataClient().health()"
+
+# Dagster
+@asset
+def romdoul_metadata() -> list[dict]:
+    return MetadataClient(USER, PASS).export_json()
+
 `**opts` on `parse_document_pages` are the per-page request options —
 `translate`, `target_lang`, `source_lang`, `detect_layout`, `detect_lines`,
 `use_ctc`, `dpi` — applied to every page. It is *not* the whole `parse_document`
