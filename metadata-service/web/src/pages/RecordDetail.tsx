@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type AuditEventOut } from "../api/client";
@@ -95,6 +95,9 @@ export default function RecordDetail() {
   const [tab, setTab] = useState<"data" | "details" | "history">("data");
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [localDomain, setLocalDomain] = useState('');
+  const [localTags, setLocalTags] = useState('');
+  const [localDate, setLocalDate] = useState('');
   const user = getUser();
   const canEdit = user?.role === "admin" || user?.role === "editor";
 
@@ -127,6 +130,14 @@ export default function RecordDetail() {
   });
 
   if (isLoading || !rec) return <div className="p-8 text-slate-500">Loading…</div>;
+
+  // Sync local state when record loads
+  useEffect(() => {
+    setLocalDomain((rec.business?.domain as string) ?? '');
+    setLocalTags(((rec.business?.tags as string[]) ?? []).join(', '));
+    setLocalDate((rec.business?.date as string) ?? '');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec.id]);
 
   return (
     <div className="p-6 max-w-5xl">
@@ -168,17 +179,40 @@ export default function RecordDetail() {
       )}
 
       {tab === "data" && (
-        <Section title="Data payload">
-          {canEdit ? (
-            <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => patch.mutate({ data: d })} />
-          ) : (
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 dark:bg-white/5 p-3 font-mono text-xs">
-              {JSON.stringify(rec.data, null, 2)}
-            </pre>
+        <div className="space-y-4">
+          {canEdit && (
+            <Section title="Business metadata">
+              <div className="flex flex-wrap gap-3">
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Domain</label>
+                  <input className="input w-44" value={localDomain} onChange={(e) => setLocalDomain(e.target.value)} placeholder="e.g. logistics" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tags</label>
+                  <input className="input w-52" value={localTags} onChange={(e) => setLocalTags(e.target.value)} placeholder="import, warehouse" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Date</label>
+                  <input className="input w-36" type="date" value={localDate} onChange={(e) => setLocalDate(e.target.value)} />
+                </div>
+              </div>
+            </Section>
           )}
-          {saved && <span className="mt-2 block text-xs font-medium text-accent2">Saved — audit updated, status → edited</span>}
-          {saveError && <span className="mt-2 block text-xs text-red-500">{saveError}</span>}
-        </Section>
+          <Section title="Data fields">
+            {canEdit ? (
+              <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => {
+                const biz = { domain: localDomain.trim() || null, tags: localTags.split(',').map(t => t.trim()).filter(Boolean), date: localDate || null };
+                patch.mutate({ data: d, business: biz });
+              }} />
+            ) : (
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 dark:bg-white/5 p-3 font-mono text-xs">
+                {JSON.stringify(rec.data, null, 2)}
+              </pre>
+            )}
+          </Section>
+          {saved && <span className="block text-xs font-medium text-accent2">Saved — audit updated, status → edited</span>}
+          {saveError && <span className="block text-xs text-red-500">{saveError}</span>}
+        </div>
       )}
 
       {tab === "history" && (

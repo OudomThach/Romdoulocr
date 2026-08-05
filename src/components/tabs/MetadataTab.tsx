@@ -121,12 +121,20 @@ function RecordDetail({
   const toast = useToastStore((s) => s.push);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [localDomain, setLocalDomain] = useState((rec.business?.domain as string) ?? '');
+  const [localTags, setLocalTags] = useState(((rec.business?.tags as string[]) ?? []).join(', '));
+  const [localDate, setLocalDate] = useState((rec.business?.date as string) ?? '');
 
   const save = async (data: Record<string, unknown>) => {
     setSaving(true);
     setSaveError(null);
+    const biz = {
+      domain: localDomain.trim() || null,
+      tags: localTags.split(',').map((t) => t.trim()).filter(Boolean),
+      date: localDate || null,
+    };
     try {
-      await metaClient.patchRecord(rec.id, { data });
+      await metaClient.patchRecord(rec.id, { data, business: biz });
       toast('Record updated — status: edited', 'success');
       qc.invalidateQueries({ queryKey: ['meta-records'] });
       qc.invalidateQueries({ queryKey: ['record', rec.id] });
@@ -193,19 +201,40 @@ function RecordDetail({
       )}
 
       {tab === 'data' && (
-        <div className="panel p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Data payload
+        <div className="space-y-4">
+          <div className="panel p-4">
+            <div className="mb-3 flex flex-wrap gap-3">
+              <div>
+                <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Domain</label>
+                <input className="input w-44" value={localDomain} onChange={(e) => setLocalDomain(e.target.value)} placeholder="e.g. logistics" />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tags</label>
+                <input className="input w-48" value={localTags} onChange={(e) => setLocalTags(e.target.value)} placeholder="import, warehouse" />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Date</label>
+                <input className="input w-36" type="date" value={localDate} onChange={(e) => setLocalDate(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1 mb-3">
+              {localTags.split(',').map((t) => t.trim()).filter(Boolean).map((tag) => (
+                <span key={tag} className="chip">{tag}</span>
+              ))}
+            </div>
           </div>
-          {canEdit ? (
-            <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => void save(d)} />
-          ) : (
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">
-              {JSON.stringify(rec.data, null, 2)}
-            </pre>
-          )}
-          {saving && <p className="mt-2 text-xs text-slate-500">Saving…</p>}
-          {saveError && <p className="mt-2 text-xs text-red-500">{saveError}</p>}
+          <div className="panel p-4">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Data fields</div>
+            {canEdit ? (
+              <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => void save(d)} />
+            ) : (
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">
+                {JSON.stringify(rec.data, null, 2)}
+              </pre>
+            )}
+          </div>
+          {saving && <p className="text-xs text-slate-500">Saving…</p>}
+          {saveError && <p className="text-xs text-red-500">{saveError}</p>}
         </div>
       )}
 
