@@ -18,7 +18,8 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const openRecord = useMetadataStore((s) => s.openRecord);
   const setActiveTab = useSettingsStore((s) => s.setActiveTab);
   const toast = useToastStore((s) => s.push);
-  const { signedIn } = useMetaAuth();
+  const { signedIn, user } = useMetaAuth();
+  const canEdit = user?.role === 'admin' || user?.role === 'editor';
   const [loginOpen, setLoginOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [data, setData] = useState<Record<string, unknown> | null>(null);
@@ -95,10 +96,12 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           <div className="mt-0.5 truncate font-mono text-[11px] text-slate-500">{last.id}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {signedIn ? (
+          {canEdit ? (
             <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => void startEdit()} disabled={saving}>
               {editing ? 'Close' : 'Edit'}
             </button>
+          ) : signedIn ? (
+            <span className="text-xs text-slate-400 italic">view only (editor role needed)</span>
           ) : (
             <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setLoginOpen(true)}>
               Sign in to edit

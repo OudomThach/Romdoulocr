@@ -106,12 +106,14 @@ function RecordDetail({
   onBack,
   onDelete,
   canDelete,
+  canEdit,
   onSaved,
 }: {
   rec: MetaRecord;
   onBack: () => void;
   onDelete: () => void;
   canDelete: boolean;
+  canEdit: boolean;
   onSaved: () => void;
 }) {
   const [tab, setTab] = useState<'data' | 'details' | 'history'>('data');
@@ -193,9 +195,15 @@ function RecordDetail({
       {tab === 'data' && (
         <div className="panel p-4">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Data payload — edit the extraction result
+            Data payload
           </div>
-          <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => void save(d)} />
+          {canEdit ? (
+            <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => void save(d)} />
+          ) : (
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">
+              {JSON.stringify(rec.data, null, 2)}
+            </pre>
+          )}
           {saving && <p className="mt-2 text-xs text-slate-500">Saving…</p>}
           {saveError && <p className="mt-2 text-xs text-red-500">{saveError}</p>}
         </div>
@@ -289,6 +297,7 @@ export function MetadataTab() {
           onBack={() => setSelected(null)}
           onDelete={() => void remove(selected)}
           canDelete={user?.role === 'admin'}
+          canEdit={user?.role === 'admin' || user?.role === 'editor'}
           onSaved={() => {
             // Refresh the selected record so the form + audit reflect the save.
             void metaClient.getRecord(selected.id).then(setSelected).catch(() => {});

@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type AuditEventOut } from "../api/client";
 import StatusBadge from "../components/StatusBadge";
 import DataFormEditor from "../components/DataFormEditor";
+import { getUser } from "../api/client";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -94,6 +95,8 @@ export default function RecordDetail() {
   const [tab, setTab] = useState<"data" | "details" | "history">("data");
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const user = getUser();
+  const canEdit = user?.role === "admin" || user?.role === "editor";
 
   const { data: rec, isLoading } = useQuery({
     queryKey: ["record", id],
@@ -165,8 +168,14 @@ export default function RecordDetail() {
       )}
 
       {tab === "data" && (
-        <Section title="Data payload — edit the extraction result">
-          <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => patch.mutate({ data: d })} />
+        <Section title="Data payload">
+          {canEdit ? (
+            <DataFormEditor key={rec.edit_count} data={rec.data} onChange={(d) => patch.mutate({ data: d })} />
+          ) : (
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 dark:bg-white/5 p-3 font-mono text-xs">
+              {JSON.stringify(rec.data, null, 2)}
+            </pre>
+          )}
           {saved && <span className="mt-2 block text-xs font-medium text-accent2">Saved — audit updated, status → edited</span>}
           {saveError && <span className="mt-2 block text-xs text-red-500">{saveError}</span>}
         </Section>

@@ -62,8 +62,8 @@ async def create_user(
     session: AsyncSession = Depends(get_session),
 ) -> UserOut:
     _require_admin(actor)
-    if payload.role not in ("admin", "viewer"):
-        raise HTTPException(status_code=422, detail="role must be admin or viewer")
+    if payload.role not in ("admin", "editor", "viewer"):
+        raise HTTPException(status_code=422, detail="role must be admin, editor, or viewer")
     if not payload.username.strip() or len(payload.password) < 8:
         raise HTTPException(status_code=422, detail="username required, password at least 8 chars")
     exists = await session.execute(select(User).where(User.username == payload.username.strip()))
@@ -110,8 +110,8 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="user not found")
     if payload.role is not None:
-        if payload.role not in ("admin", "viewer"):
-            raise HTTPException(status_code=422, detail="role must be admin or viewer")
+        if payload.role not in ("admin", "editor", "viewer"):
+            raise HTTPException(status_code=422, detail="role must be admin, editor, or viewer")
         user.role = payload.role
         await session.commit()
     return UserOut(id=user.id, username=user.username, role=user.role)

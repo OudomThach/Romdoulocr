@@ -203,6 +203,8 @@ async def patch_record(
     x_edited_by: str | None = Header(default=None),
     _actor: Actor = Depends(require_auth),
 ) -> models.Record:
+    if _actor.role not in ("admin", "editor"):
+        raise APIError(403, "forbidden", "Admin or editor role required to edit records")
     rec = await session.get(models.Record, record_id)
     if not rec:
         raise APIError(404, "not_found", f"record {record_id} not found")
