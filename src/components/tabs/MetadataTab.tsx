@@ -413,6 +413,7 @@ export function MetadataTab() {
           <table className="w-full">
           <thead className="border-b border-slate-200 bg-slate-50/60">
             <tr>
+              <th className="th w-12"></th>
               <th className="th w-48">Document</th>
               <th className="th">Type</th>
               <th className="th">Model</th>
@@ -424,24 +425,37 @@ export function MetadataTab() {
           <tbody>
             {isLoading && (
               <tr>
-                <td className="td text-slate-500" colSpan={6}>Loading…</td>
+                <td className="td text-slate-500" colSpan={7}>Loading…</td>
               </tr>
             )}
             {page?.items.length === 0 && (
               <tr>
-                <td className="td text-slate-500" colSpan={6}>
+                <td className="td text-slate-500" colSpan={7}>
                   No records yet — parse a document and it will be saved here automatically.
                 </td>
               </tr>
             )}
             {page?.items.map((r) => {
               const docName = (r.data?.document_name as string) || (r.source?.filename as string) || '—';
+              const thumb = (r.source?.thumbnail_base64 as string) || null;
               return (
               <tr
                 key={r.id}
                 className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50/60"
                 onClick={() => setSelected(r)}
               >
+                <td className="td py-1.5">
+                  {thumb ? (
+                    <img src={thumb} alt="" className="h-10 w-10 rounded-md border border-slate-200 object-cover" />
+                  ) : (
+                    <span className="grid h-10 w-10 place-items-center rounded-md border border-dashed border-slate-200 bg-slate-50 text-slate-300">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="3" y="3" width="18" height="14" rx="2" />
+                        <path d="M3 13l5-5 3 3 4-4 6 6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  )}
+                </td>
                 <td className="td max-w-52 truncate font-medium text-slate-900" title={docName}>
                   {docName}
                 </td>

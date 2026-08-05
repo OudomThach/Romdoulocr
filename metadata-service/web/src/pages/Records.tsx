@@ -80,6 +80,7 @@ export default function Records() {
         <table className="w-full">
           <thead className="border-b border-slate-200 bg-slate-50/60 dark:bg-white/5">
             <tr>
+              <th className="th w-12"></th>
               <th className="th w-48">Document</th>
               <th className="th">Type</th>
               <th className="th">Model</th>
@@ -90,15 +91,28 @@ export default function Records() {
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td className="td text-slate-500" colSpan={6}>Loading…</td></tr>
+              <tr><td className="td text-slate-500" colSpan={7}>Loading…</td></tr>
             )}
             {page?.items.length === 0 && (
-              <tr><td className="td text-slate-500" colSpan={6}>No records match the filters.</td></tr>
+              <tr><td className="td text-slate-500" colSpan={7}>No records match the filters.</td></tr>
             )}
             {page?.items.map((r) => {
               const docName = (r.data?.document_name as string) || (r.source?.filename as string) || '—';
+              const thumb = (r.source?.thumbnail_base64 as string) || null;
               return (
               <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60 dark:border-white/5 dark:hover:bg-white/5">
+                <td className="td py-1.5">
+                  {thumb ? (
+                    <img src={thumb} alt="" className="h-10 w-10 rounded-md border border-slate-200 dark:border-white/10 object-cover" />
+                  ) : (
+                    <span className="grid h-10 w-10 place-items-center rounded-md border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-300">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="3" y="3" width="18" height="14" rx="2" />
+                        <path d="M3 13l5-5 3 3 4-4 6 6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  )}
+                </td>
                 <td className="td max-w-52 truncate font-medium text-slate-900 dark:text-slate-100" title={docName}>
                   <Link to={`/records/${r.id}`} className="text-accent hover:underline dark:drop-shadow-[0_0_6px_rgba(0,229,255,0.5)]">
                     {docName}
