@@ -33,6 +33,7 @@ def _build_envelope(payload: schemas.RecordCreate, actor: str, now: dt.datetime)
         "created_at": created_at.isoformat(),
         "created_by": created_by,
         "status": status,
+        "edit_count": 0,
         **audit_in,
     }
     envelope["record"] = {"validation": {"status": "accepted", "warnings": []}, "ingested_at": now.isoformat()}

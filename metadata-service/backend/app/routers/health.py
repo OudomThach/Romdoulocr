@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,10 +9,10 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health(session: AsyncSession = Depends(get_session)) -> dict:
+async def health(session: AsyncSession = Depends(get_session)) -> JSONResponse:
     try:
         await session.execute(text("SELECT 1"))
         db_ok = True
     except Exception:  # noqa: BLE001
         db_ok = False
-    return {"status": "ok" if db_ok else "degraded", "db": "ok" if db_ok else "error"}
+    return JSONResponse({"status": "ok" if db_ok else "degraded", "db": "ok" if db_ok else "error"}, headers={"Cache-Control": "public, max-age=30"})

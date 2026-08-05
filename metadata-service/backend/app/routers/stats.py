@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crud
@@ -9,13 +10,13 @@ router = APIRouter(prefix="/api/v1", tags=["stats"], dependencies=[Depends(requi
 
 
 @router.get("/stats")
-async def get_stats(session: AsyncSession = Depends(get_session)) -> dict:
-    return await crud.stats(session)
+async def get_stats(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    return JSONResponse(await crud.stats(session), headers={"Cache-Control": "public, max-age=10"})
 
 
 @router.get("/meta")
-async def get_meta(session: AsyncSession = Depends(get_session)) -> dict:
-    return {
-        "types": await crud.get_types(session),
-        "domains": await crud.get_domains(session),
-    }
+async def get_meta(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    return JSONResponse(
+        {"types": await crud.get_types(session), "domains": await crud.get_domains(session)},
+        headers={"Cache-Control": "public, max-age=60"},
+    )
