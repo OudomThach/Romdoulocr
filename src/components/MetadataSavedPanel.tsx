@@ -4,13 +4,14 @@ import { useMetaAuth } from '@/lib/useMetaAuth';
 import { metaClient } from '@/lib/metaClient';
 import { LoginModal } from '@/components/LoginModal';
 import { DataFormEditor } from '@/components/DataFormEditor';
+import { CreateDatasetForm, type DatasetPayload } from '@/components/CreateDatasetForm';
 import { useSettingsStore } from '@/hooks/useSettingsStore';
 import { useToastStore } from '@/hooks/useToastStore';
 
 /**
- * Inline panel after a parse: shows saved status + [Edit] to expand a dynamic
- * editor right here. Edit the extraction data AND the business metadata
- * (domain, tags, date) — no tab hopping. Saving PATCHes both at once.
+ * Inline panel after a parse: shows saved status + [Edit] to expand the
+ * extraction data editor (OCR fields) and the Create New Public Dataset form.
+ * The dataset metadata is stored on the record under `data.dataset`.
  */
 export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const last = useMetadataStore((s) => s.get(filename ?? null));
@@ -24,26 +25,15 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [data, setData] = useState<Record<string, unknown> | null>(null);
-  const [domain, setDomain] = useState('');
-  const [tags, setTags] = useState('');
-  const [date, setDate] = useState('');
-  const [docName, setDocName] = useState('');
-  const [owner, setOwner] = useState('');
-  const [category, setCategory] = useState('');
-  const [subCategory, setSubCategory] = useState('');
-  const [desc, setDesc] = useState('');
-  const [published, setPublished] = useState(false);
-  const [copyright, setCopyright] = useState(false);
-  const [imageUrl, setImageUrl] = useState('');
-  const [title, setTitle] = useState('');
-  const [org, setOrg] = useState('');
-  const [location, setLocation] = useState('');
+  const [dataset, setDataset] = useState<Record<string, unknown> | null>(null);
+  const [createdAt, setCreatedAt] = useState('');
+  const [updatedAt, setUpdatedAt] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Auto-expand the fill-in form on freshly-extracted records so users can
-  // complete the metadata right after extraction without an extra click.
+  // Auto-expand the form on freshly-extracted records so users can complete
+  // the dataset metadata right after extraction without an extra click.
   // MUST be before the conditional return — React hooks are positional.
   useEffect(() => {
     if (!last || !last.justCreated || !canEdit) return;
@@ -53,14 +43,9 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setLoading(true);
       metaClient.getRecord(last.id).then((rec) => {
         setData(rec.data);
-        setDomain((rec.business?.domain as string) ?? '');
-        setTags(((rec.business?.tags as string[]) ?? []).join(', '));
-        setDate((rec.business?.date as string) ?? '');
-        setDocName((rec.data?.document_name as string) ?? (rec.source?.filename as string) ?? '');
-        setOwner((rec.business?.owner as string) ?? '');
-        setTitle((rec.business?.title as string) ?? '');
-        setOrg((rec.business?.organization as string) ?? '');
-        setLocation((rec.business?.location as string) ?? '');
+        setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
+        setCreatedAt(rec.created_at ?? '');
+        setUpdatedAt((rec.audit?.edited_at as string) ?? '');
       }).catch(() => {})
         .finally(() => setLoading(false));
     }
@@ -77,20 +62,9 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     try {
       const rec = await metaClient.getRecord(last.id);
       setData(rec.data);
-      setDomain((rec.business?.domain as string) ?? '');
-      setTags(((rec.business?.tags as string[]) ?? []).join(', '));
-      setDate((rec.business?.date as string) ?? '');
-      setDocName((rec.data?.document_name as string) ?? (rec.source?.filename as string) ?? '');
-      setOwner((rec.business?.owner as string) ?? '');
-      setCategory((rec.business?.category as string) ?? '');
-      setSubCategory((rec.business?.sub_category as string) ?? '');
-      setDesc((rec.business?.description as string) ?? '');
-      setPublished(Boolean(rec.business?.published));
-      setCopyright(Boolean(rec.business?.copyright));
-      setImageUrl((rec.data?.image_url as string) ?? '');
-      setTitle((rec.business?.title as string) ?? '');
-      setOrg((rec.business?.organization as string) ?? '');
-      setLocation((rec.business?.location as string) ?? '');
+      setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
+      setCreatedAt(rec.created_at ?? '');
+      setUpdatedAt((rec.audit?.edited_at as string) ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load record');
     } finally {
@@ -98,40 +72,40 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     }
   };
 
-  const save = async (nextData: Record<string, unknown>) => {
+  const patch = async (nextData: Record<string, unknown>) => {
     setSaving(true);
     setError(null);
-    const biz: Record<string, unknown> = {
-      owner: owner.trim() || null,
-      category: category.trim() || null,
-      sub_category: subCategory.trim() || null,
-      description: desc.trim() || null,
-      title: title.trim() || null,
-      organization: org.trim() || null,
-      location: location.trim() || null,
-      domain: domain.trim() || null,
-      tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-      date: date || null,
-      published: published || null,
-      published_at: published ? new Date().toISOString() : null,
-      copyright: copyright || null,
-    };
-    const extras: Record<string, unknown> = {
-      ...nextData,
-      document_name: docName || null,
-      image_url: imageUrl || null,
-    };
     try {
-      await metaClient.patchRecord(last.id, { data: extras, business: biz });
-      setData(nextData);
+      const rec = await metaClient.patchRecord(last.id, { data: nextData });
+      setData(rec.data);
+      setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
+      setUpdatedAt((rec.audit?.edited_at as string) ?? '');
       patchSummary(last.id, { status: 'edited' });
       toast('Saved — status: edited', 'success');
-      setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSaving(false);
     }
+  };
+
+  // DataFormEditor edits the OCR fields; the dataset object it must not see
+  // (it is managed by CreateDatasetForm) is stripped before rendering and
+  // re-attached on save.
+  const dataForEditor = (() => {
+    if (!data) return {};
+    const { dataset: _ds, ...rest } = data;
+    return rest;
+  })();
+
+  const saveExtraction = async (nextData: Record<string, unknown>) => {
+    await patch({ ...nextData, dataset: dataset ?? {} });
+    setEditing(false);
+  };
+
+  const saveDataset = async (payload: DatasetPayload) => {
+    if (!data) return;
+    await patch({ ...data, dataset: { ...(dataset ?? {}), ...payload } });
   };
 
   const openFull = () => {
@@ -182,81 +156,14 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           {error && <p className="text-sm text-red-500">{error}</p>}
           {data && !loading && (
             <>
-              <div className="flex flex-wrap gap-2">
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Document</label>
-                  <input className="input w-48" value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="e.g. report-aug-2026.pdf" />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Owner</label>
-                  <input className="input w-40" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="e.g. Oudom" />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Category</label>
-                  <input className="input w-36" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. receipt" />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sub-category</label>
-                  <input className="input w-36" value={subCategory} onChange={(e) => setSubCategory(e.target.value)} placeholder="e.g. food" />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Domain</label>
-                  <input className="input w-40" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="e.g. logistics" />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tags</label>
-                  <input className="input w-48" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="import, warehouse" />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Date</label>
-                  <input className="input w-36" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Title</label>
-                  <input className="input w-36" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Q3 Revenue" />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Org</label>
-                  <input className="input w-36" value={org} onChange={(e) => setOrg(e.target.value)} placeholder="e.g. MPTC" />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Location</label>
-                  <input className="input w-36" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Phnom Penh" />
-                </div>
-              </div>
-              <div>
-                <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notes</label>
-                <textarea className="input min-h-16" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Any notes about this extraction…" rows={2} />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPublished((p) => !p)}
-                  className="flex items-center gap-2"
-                  aria-pressed={published}
-                >
-                  <span className={`h-5 w-9 rounded-full p-0.5 transition-colors ${published ? 'bg-accent' : 'bg-slate-300'}`}>
-                    <span className={`block h-4 w-4 rounded-full bg-white shadow transition-transform ${published ? 'translate-x-4' : ''}`} />
-                  </span>
-                  <span className="text-sm text-slate-700">{published ? 'Published' : 'Not published'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCopyright((c) => !c)}
-                  className="flex items-center gap-2"
-                  aria-pressed={copyright}
-                >
-                  <span className={`h-5 w-9 rounded-full p-0.5 transition-colors ${copyright ? 'bg-accent2' : 'bg-slate-300'}`}>
-                    <span className={`block h-4 w-4 rounded-full bg-white shadow transition-transform ${copyright ? 'translate-x-4' : ''}`} />
-                  </span>
-                  <span className="text-sm text-slate-700">{copyright ? '© Copyright' : 'No copyright'}</span>
-                </button>
-                <div>
-                  <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Image URL</label>
-                  <input className="input w-48" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" />
-                </div>
-              </div>
-              <DataFormEditor key={last.status} data={data} onChange={save} />
+              <DataFormEditor key={last.status} data={dataForEditor} onChange={saveExtraction} />
+              <CreateDatasetForm
+                initial={dataset}
+                createdAt={createdAt}
+                updatedAt={updatedAt}
+                saving={saving}
+                onSave={saveDataset}
+              />
             </>
           )}
         </div>
