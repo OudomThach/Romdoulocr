@@ -419,8 +419,6 @@ export function DocumentParserTab() {
               </button>
             </div>
             <div className="mb-3">
-              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
-            </div>
           <ExtractionResultsCard
             result={currentResult}
             currentPage={currentPage}
@@ -433,6 +431,10 @@ export function DocumentParserTab() {
             markdownMode={markdownMode}
             onMarkdownModeChange={setMarkdownMode}
           />
+            </div>
+            <div className="mb-3">
+              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
+            </div>
           </div>
         ) : (
           <FileReadyPanel

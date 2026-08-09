@@ -1112,10 +1112,6 @@ export function CompareTab() {
           </div>
         )}
 
-        <div className="mt-3">
-          <MetadataSavedPanel filename={files[activeIdx]?.name ?? null} />
-        </div>
-
         {/* Page selection (any mode, PDF only) — all selected pages are processed. */}
         {isPdfFile(file) && (
           <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
@@ -1392,6 +1388,10 @@ export function CompareTab() {
           <VoteButton key={b} label={BACKEND_NAME[b]} active={vote === b} disabled={!bothOk} onClick={() => onVote(b)} />
         ))}
         <VoteButton label="Tie" active={vote === 'tie'} disabled={!bothOk} onClick={() => onVote('tie')} />
+      </div>
+
+      <div className="mt-3">
+        <MetadataSavedPanel filename={files[activeIdx]?.name ?? null} />
       </div>
     </div>
   );

@@ -414,8 +414,6 @@ export function TranslatedTab() {
               </button>
             </div>
             <div className="mb-3">
-              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
-            </div>
           <ExtractionResultsCard
             result={currentResult}
             currentPage={currentPage}
@@ -434,6 +432,10 @@ export function TranslatedTab() {
             targetLang={targetLang}
             tableCount={tableCount}
           />
+            </div>
+            <div className="mb-3">
+              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
+            </div>
           </div>
         ) : (
           <FileReadyPanel

@@ -18,6 +18,7 @@ import { minimalPreprocessOpts, rasterFor } from '@/lib/extractionConfig';
 import { useLocale } from '@/lib/i18n';
 import type { DocumentResult, OcrImageResponse } from '@/types/api';
 import { MetadataSavedPanel } from '@/components/MetadataSavedPanel';
+import { EditableOcrText } from '@/components/EditableOcrText';
 
 interface PreparedFile {
   id: string;
@@ -337,10 +338,6 @@ export function OcrImageTab() {
             <VerificationNotice />
           </div>
 
-          <div className="mt-4">
-            <MetadataSavedPanel filename={currentResult.filename ?? null} />
-          </div>
-
           {/* Action row — thumb-sized, copy is the hero action. */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
@@ -389,12 +386,11 @@ export function OcrImageTab() {
               emptyImageMessage={t('ocr.noImage')}
               output={
                 cleanText.trim() ? (
-                  <div
-                    className="whitespace-pre-wrap text-base leading-relaxed"
-                    style={{ fontFamily: "'Noto Sans Khmer', 'Khmer OS Siemreap', 'Segoe UI', sans-serif" }}
-                  >
-                    {cleanText}
-                  </div>
+                  <EditableOcrText
+                    filename={currentResult.filename ?? null}
+                    text={cleanText}
+                    fontStyle={{ fontFamily: "'Noto Sans Khmer', 'Khmer OS Siemreap', 'Segoe UI', sans-serif" }}
+                  />
                 ) : (
                   <div className="grid gap-1.5 text-sm">
                     <span className="font-medium text-amber-600">{t('ocr.noText')}</span>
@@ -403,6 +399,10 @@ export function OcrImageTab() {
                 )
               }
             />
+          </div>
+
+          <div className="mt-4">
+            <MetadataSavedPanel filename={currentResult.filename ?? null} />
           </div>
         </section>
       )}

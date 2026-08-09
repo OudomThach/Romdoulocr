@@ -3,15 +3,15 @@ import { useMetadataStore } from '@/lib/metadataStore';
 import { useMetaAuth } from '@/lib/useMetaAuth';
 import { metaClient } from '@/lib/metaClient';
 import { LoginModal } from '@/components/LoginModal';
-import { DataFormEditor } from '@/components/DataFormEditor';
 import { CreateDatasetForm, type DatasetPayload } from '@/components/CreateDatasetForm';
 import { useSettingsStore } from '@/hooks/useSettingsStore';
 import { useToastStore } from '@/hooks/useToastStore';
 
 /**
  * Inline panel after a parse: shows saved status + [Edit] to expand the
- * extraction data editor (OCR fields) and the Create New Public Dataset form.
- * The dataset metadata is stored on the record under `data.dataset`.
+ * Create New Public Dataset form. The dataset metadata is stored on the
+ * record under `data.dataset`. The raw OCR fields live in the portal's
+ * Full record page; inline OCR text correction is EditableOcrText.
  */
 export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const last = useMetadataStore((s) => s.get(filename ?? null));
@@ -89,20 +89,8 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     }
   };
 
-  // DataFormEditor edits the OCR fields; the dataset object it must not see
-  // (it is managed by CreateDatasetForm) is stripped before rendering and
-  // re-attached on save.
-  const dataForEditor = (() => {
-    if (!data) return {};
-    const { dataset: _ds, ...rest } = data;
-    return rest;
-  })();
-
-  const saveExtraction = async (nextData: Record<string, unknown>) => {
-    await patch({ ...nextData, dataset: dataset ?? {} });
-    setEditing(false);
-  };
-
+  // DataFormEditor is gone from this panel (portal Full record owns the raw
+  // fields); `data` is kept for merging the dataset payload on save.
   const saveDataset = async (payload: DatasetPayload) => {
     if (!data) return;
     await patch({ ...data, dataset: { ...(dataset ?? {}), ...payload } });
@@ -156,7 +144,6 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           {error && <p className="text-sm text-red-500">{error}</p>}
           {data && !loading && (
             <>
-              <DataFormEditor key={last.status} data={dataForEditor} onChange={saveExtraction} />
               <CreateDatasetForm
                 initial={dataset}
                 createdAt={createdAt}

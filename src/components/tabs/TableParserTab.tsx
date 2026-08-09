@@ -292,8 +292,6 @@ export function TableParserTab() {
               </button>
             </div>
             <div className="mb-3">
-              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
-            </div>
           <TableExtractionResultsCard
             result={currentResult}
             uploadPreviewUrl={uploadPreviewUrl}
@@ -306,6 +304,10 @@ export function TableParserTab() {
             tidyResult={currentResultKey ? tidyByKey[currentResultKey] ?? null : null}
             onTidy={onTidy}
           />
+            </div>
+            <div className="mb-3">
+              <MetadataSavedPanel filename={currentResult?.filename ?? null} />
+            </div>
           </div>
         ) : (
           <FileReadyPanel
