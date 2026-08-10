@@ -55,14 +55,98 @@ function fmtSize(bytes: number): string {
   return `${bytes} B`;
 }
 
+// --------------------------------------------------------------------------- #
+// OCR-text → dataset suggestions. Best-effort heuristics; every rule only
+// fills a field the user has NOT already typed, so nothing is overwritten.
+// --------------------------------------------------------------------------- #
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+const ORG_RE = /(ABA\s*Bank|ACLEDA\s*Bank|Wing\s*(?:Cambodia)?|Bakong|Canadia\s*Bank|PRASAC|Vattanac\s*Bank|Sathapana\s*Bank|Bank\s*of\s*Cambodia)/i;
+
+function toIso(y: number, m: number, d: number): string {
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/** Dates found in the text, normalized to ISO (yyyy-mm-dd), sorted. */
+function detectDates(raw: string): string[] {
+  const hits: string[] = [];
+  const monthRe = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = monthRe.exec(raw)) !== null) hits.push(m[0]);
+  const isoRe = /\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/g;
+  while ((m = isoRe.exec(raw)) !== null) hits.push(m[0]);
+  const dmyRe = /\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/g;
+  while ((m = dmyRe.exec(raw)) !== null) hits.push(m[0]);
+
+  const out: string[] = [];
+  for (const h of hits) {
+    const mm = h.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})$/i);
+    if (mm) {
+      out.push(toIso(Number(mm[3]), MONTHS[mm[1].slice(0, 3).toLowerCase()], Number(mm[2])));
+      continue;
+    }
+    const iso = h.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    if (iso) {
+      out.push(toIso(Number(iso[1]), Number(iso[2]), Number(iso[3])));
+      continue;
+    }
+    const dmy = h.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (dmy) out.push(toIso(Number(dmy[3]), Number(dmy[2]), Number(dmy[1])));
+  }
+  return [...new Set(out)].sort();
+}
+
+/** Best-effort dataset fields from the OCR text. */
+function suggestFromText(raw: string): Partial<DatasetPayload> {
+  const out: Partial<DatasetPayload> = {};
+  const text = raw || '';
+  if (!text.trim()) return out;
+
+  const dates = detectDates(text);
+  if (dates.length) out.coverage_start = dates[0];
+  if (dates.length > 1) out.coverage_end = dates[dates.length - 1];
+
+  const org = text.match(ORG_RE);
+  if (org) out.managed_by = org[1];
+
+  if (/KHQR|QR|transfer|transaction|payment|deposit|withdraw/i.test(text)) {
+    out.categories = 'receipt, bank transfer';
+  } else if (/invoice|bill|tax/i.test(text)) {
+    out.categories = 'invoice';
+  } else if (/report|survey|yearbook|index|statistic/i.test(text)) {
+    out.categories = 'report';
+  }
+
+  const url = text.match(/https?:\/\/\S+/);
+  if (url) out.url = url[0];
+
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const firstLine = lines[0];
+  if (firstLine && firstLine.length <= 90) out.name = firstLine;
+
+  if (lines.length >= 2) {
+    out.description = lines.slice(0, 2).join(' ');
+  } else if (lines.length === 1) {
+    out.description = lines[0];
+  }
+  if (out.description && out.description.length > 300) {
+    out.description = `${out.description.slice(0, 300)}…`;
+  }
+  return out;
+}
+
 export function CreateDatasetForm({
   initial,
+  text,
   createdAt,
   updatedAt,
   saving,
   onSave,
 }: {
   initial?: Record<string, unknown> | null;
+  text?: string;
   createdAt?: string;
   updatedAt?: string;
   saving?: boolean;
@@ -124,6 +208,31 @@ export function CreateDatasetForm({
     setValidation({ ok: issues.length === 0, issues });
   };
 
+  // Fill ONLY fields the user has not typed yet — never overwrite an edit.
+  const applySuggestions = () => {
+    const s = suggestFromText(text ?? '');
+    if (!name.trim() && s.name) setName(s.name);
+    if (!managedBy.trim() && s.managed_by) setManagedBy(s.managed_by);
+    if (!coverageStart && s.coverage_start) setCoverageStart(s.coverage_start);
+    if (!coverageEnd && s.coverage_end) setCoverageEnd(s.coverage_end);
+    if (!categories.trim() && s.categories) setCategories(s.categories);
+    if (!url.trim() && s.url) setUrl(s.url);
+    if (!description.trim() && s.description) setDescription(s.description);
+    setValidation(null);
+  };
+
+  // Auto-suggest once on first open when nothing was typed yet.
+  const autoSuggested = useRef(false);
+  useEffect(() => {
+    if (autoSuggested.current) return;
+    if (!text?.trim()) return;
+    const anyFilled = name.trim() || managedBy.trim() || coverageStart || categories.trim();
+    if (anyFilled) return;
+    autoSuggested.current = true;
+    applySuggestions();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
   const save = () => {
     const payload: DatasetPayload = {
       name: name.trim() || null,
@@ -142,8 +251,22 @@ export function CreateDatasetForm({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white/70 p-4">
-      <div className="mb-1 text-sm font-semibold text-slate-900">Create New Public Dataset</div>
-      <div className="mb-3 text-xs text-slate-500">Create a new open dataset for public access.</div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">Create New Public Dataset</div>
+          <div className="text-xs text-slate-500">Create a new open dataset for public access.</div>
+        </div>
+        {text?.trim() && (
+          <button
+            type="button"
+            onClick={applySuggestions}
+            className="btn-secondary px-3 py-1.5 text-xs"
+            title="Fill empty fields from the OCR text"
+          >
+            ✨ Suggest from OCR
+          </button>
+        )}
+      </div>
 
       <div className="flex flex-wrap gap-3">
         <div className="w-full">

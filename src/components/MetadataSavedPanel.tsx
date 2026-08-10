@@ -146,6 +146,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
             <>
               <CreateDatasetForm
                 initial={dataset}
+                text={(data?.full_text as string) ?? ''}
                 createdAt={createdAt}
                 updatedAt={updatedAt}
                 saving={saving}
