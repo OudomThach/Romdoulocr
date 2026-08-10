@@ -509,6 +509,25 @@ Clients you can reuse in your own scripts: `clients/python/romdoul.py`
 `clients/python/metadata.py` (records CRUD, export, user management, Airflow
 helper). Both are stdlib + `requests`.
 
+## 7c. Interactive docs — Swagger UI
+
+| Service | Swagger UI | OpenAPI spec |
+|---|---|---|
+| **Full OCR API (custom, branded)** | `https://romdoulocr.netlify.app/api-docs.html` | `/openapi.json` |
+| vLLM adapter | `/v1/api-vllm/docs` | `/v1/api-vllm/openapi.json` |
+| Lens adapter | `/v1/api-lens/docs` | `/v1/api-lens/openapi.json` |
+| Tidy adapter | `/v1/api-tidy/docs` | `/v1/api-tidy/openapi.json` |
+| Jobs adapter | `/v1/api-jobs/docs` | `/v1/api-jobs/openapi.json` |
+| Status adapter | `/v1/api-status/docs` | `/v1/api-status/openapi.json` |
+| Metadata service | `/v1/api-meta/api/docs` | `/v1/api-meta/api/openapi.json` |
+
+All relative to `https://romdoulocr.netlify.app` (public) or
+`https://apt-server-desktop.tail806605.ts.net` (direct funnel) or
+`http://localhost:8181` (home). The custom `api-docs.html` is the recommended
+entry point for integrators — it documents the whole OCR contract across all
+three engines in one page; the per-service `/docs` pages are the raw FastAPI
+schemas (useful for jobs/metadata specifics).
+
 ## 8. Operations
 
 | Concern | Where |
