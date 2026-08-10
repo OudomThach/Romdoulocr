@@ -273,7 +273,107 @@ will open, or Khmer mojibakes.
 
 ---
 
-## 4b. Availability — read this before you depend on it
+## 4c. Batch jobs API (`/api-jobs`)
+
+Asynchronous OCR for anything too big or too slow for a synchronous call: submit
+once, poll for progress, fetch the merged result. The service splits PDFs into
+single pages, drives the engines itself, and survives dropped connections.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/v1/api-jobs/jobs` | POST | Submit a batch → `202 {"job_id": "..."}` |
+| `/v1/api-jobs/jobs` | GET | List jobs (`?limit=&offset=`) |
+| `/v1/api-jobs/jobs/{job_id}` | GET | Poll status + progress |
+| `/v1/api-jobs/jobs/{job_id}/result` | GET | Merged result (`?format=json|jsonl|csv&partial=true`) |
+| `/v1/api-jobs/jobs/{job_id}` | DELETE | Cancel / clean up |
+| `/v1/api-jobs/metrics` | GET | Queue depth, per-engine latency percentiles |
+
+**Submit — multipart `files`** (same field-name rules as the sync contract:
+`files` plural here, even for `ocr-image`/`parse-table` modes). Query params:
+
+| Param | Default | Notes |
+|---|---|---|
+| `engine` | `cloud` | `cloud` \| `vllm` \| `lens` |
+| `mode` | `parse-pdf` | `parse-pdf` \| `parse-pdf-translated` \| `ocr-image` \| `parse-table` |
+| `concurrency` | 6 | in-flight pages per engine (capped: vLLM 6, cloud 8, lens 3) |
+| `target_lang` / `source_lang` | — | translated mode only |
+| `use_ctc` / `detect_layout` / `detect_lines` / `dpi` / `row_tolerance` | — | same meaning as the sync contract |
+
+Jobs keep state in a named volume (SQLite + `<job>/parts/`), so a restarted
+service **resumes** interrupted jobs. Statuses: `queued → running → done | failed | canceled`.
+Send `Idempotency-Key` to make re-submits replay instead of re-running.
+
+```bash
+# submit a PDF for parsing on the home GPU
+curl -s -F "files=@report.pdf" \
+  "$BASE/v1/api-jobs/jobs?engine=vllm&mode=parse-pdf&dpi=240"
+
+# poll
+curl -s "$BASE/v1/api-jobs/jobs/9f2c..."        # → {"status":"running","done":3,"total":12,...}
+
+# fetch the merged result
+curl -s "$BASE/v1/api-jobs/jobs/9f2c.../result?format=json"
+```
+
+---
+
+## 4d. Metadata API (`/api-meta`)
+
+Extraction records — the saved OCR results and their metadata (owner, category,
+dataset fields, audit trail). Public at `https://romdoulocr.netlify.app/api-meta/api/v1`,
+served by the home metadata service (postgres + FastAPI).
+
+**Auth.** Login is session-based:
+
+```bash
+curl -s -X POST "$BASE/api-meta/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"...","password":"..."}'
+# → {"token":"...", "user":{"username":"...","role":"admin"}}
+```
+
+Send `X-Session-Token: <token>` on subsequent calls. Editing (PATCH/DELETE)
+requires `admin` or `editor`. `POST /records` is open (extractions auto-save).
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/health` | GET | Liveness + DB (no auth) |
+| `/auth/login` `/auth/logout` `/auth/me` | POST | Session management |
+| `/auth/users` | GET/POST | List / create users (admin) |
+| `/records` | GET | List + filter (`type, domain, status, tag, q, page, page_size, sort`) |
+| `/records` | POST | Create an extraction record (open, `id` for idempotency) |
+| `/records/{id}` | GET | Full record envelope + data |
+| `/records/{id}` | PATCH | Edit `data` / `business` / `status`; bumps the audit trail |
+| `/records/{id}` | DELETE | Delete (admin) |
+| `/records/{id}/history` | GET | Audit trail (create/update/delete events) |
+| `/export` | GET | CSV or JSON of filtered records (`?format=csv|json`) |
+| `/stats` | GET | Totals by status/type/domain + per-day |
+| `/meta` | GET | Distinct types/domains (filter dropdowns) |
+
+**Record shape.** `{id, type, status, source, audit, pipeline, business, data, envelope, created_at, ...}`.
+The post-OCR dataset form stores its fields under `data.dataset`:
+
+```jsonc
+{ "data": { "dataset": {
+    "name": "Cambodia CPI Reports 1994-2025",
+    "managed_by": "GDDE, MEF",
+    "frequency": "Yearly",
+    "coverage_start": "1994-01-01",
+    "coverage_end": "2025-12-31",
+    "categories": "receipt, bank transfer",
+    "url": "https://...",
+    "description": "...",
+    "file": { "name": "cpi.csv", "size": 4823000, "type": "text/csv" }
+}}}
+```
+
+Python client: `clients/python/metadata.py` (`MetadataClient`, `AsyncMetadataClient`),
+including `airflow_metadata_connection()` for DAGs (env: `ROMDOUL_META_URL`,
+`ROMDOUL_META_USER`, `ROMDOUL_META_PASS`).
+
+---
+
+## 4e. Availability — read this before you depend on it
 
 **There is no SLA. This is best-effort.** Be explicit with anyone integrating:
 
@@ -375,6 +475,39 @@ curl -s -F "file=@scan.png" -H "X-Adapter-Token: $ADAPTER_TOKEN" \
 practice the PC must be on for all backends. See `netlify.toml`.
 
 ---
+
+
+## 7b. Testing — one script, every surface
+
+`clients/python/smoke_test.py` hits the whole public API end-to-end:
+
+1. **Status** — `GET /v1/status` (all engines in one call)
+2. **Health** — cloud, vLLM, Lens, tidy, jobs
+3. **Normal OCR mode** - `ocr-image` through each engine (cloud, vLLM, Lens)
+3b. **Document full mode** - `parse-pdf` (page/region/full_text) through cloud + vLLM
+3c. **Table mode** - `parse-table` (cell grid) through cloud + vLLM
+5b. **Metadata after OCR** - OCR -> auto-save record -> PATCH business/dataset -> verify -> delete
+4. **Batch jobs** — submit → poll → fetch the merged result
+5. **Metadata** — login, stats, list, create/patch/history/delete a record, CSV/JSON export
+
+```bash
+# OCR engines only (no credentials needed):
+python clients/python/smoke_test.py
+
+# Full run including the metadata API:
+$env:ROMDOUL_META_USER = "admin"
+$env:ROMDOUL_META_PASS = "your-password"      # from metadata-service/.env
+python clients/python/smoke_test.py
+```
+
+Output is `[PASS]/[FAIL]/[SKIP]` per check, a summary line, and a non-zero exit
+code if anything failed. Metadata checks are skipped (not failed) when the
+credentials are absent, so the OCR side stays runnable for anyone.
+
+Clients you can reuse in your own scripts: `clients/python/romdoul.py`
+(sync OCR, retries, idempotency keys, per-page document splitting) and
+`clients/python/metadata.py` (records CRUD, export, user management, Airflow
+helper). Both are stdlib + `requests`.
 
 ## 8. Operations
 
