@@ -528,6 +528,35 @@ entry point for integrators — it documents the whole OCR contract across all
 three engines in one page; the per-service `/docs` pages are the raw FastAPI
 schemas (useful for jobs/metadata specifics).
 
+## 7d. Airflow integration
+
+Yes — the API is built for it. Both clients are stdlib + `requests`, thread-safe
+for parallel page OCR, and the metadata client has an Airflow helper:
+
+```python
+from metadata import airflow_metadata_connection
+client = airflow_metadata_connection()   # reads ROMDOUL_META_URL/USER/PASS
+```
+
+Ready-to-copy DAGs live in `clients/python/airflow_examples.py`:
+
+| DAG | Schedule | What it does |
+|---|---|---|
+| `romdoul_daily_export` | `@daily` | Pulls yesterday's records → timestamped CSV |
+| `romdoul_health_check` | every 5 min | Probes metadata + cloud + vLLM health, alerts on failure |
+| `romdoul_ocr_to_metadata` | manual | OCRs a list of files (vLLM) → auto-saves each to metadata |
+| `romdoul_weekly_report` | `@weekly` | Stats summary (ready for a Slack hook) |
+
+Setup: `pip install requests apache-airflow`, copy `romdoul.py` + `metadata.py`
+into your `dags/` folder (or PYTHONPATH), set the three env vars above.
+
+Key points for pipelines:
+- `POST /records` is **open** — extraction DAGs can save records without any
+  credential (see DAG 3, which uses `MetadataClient()` with no auth).
+- Editing metadata (PATCH) needs the session login — the client handles it.
+- Retry any `5xx`/timeout with the same `Idempotency-Key`; the batch jobs API
+  (`/v1/api-jobs`) survives dropped connections for long documents.
+
 ## 8. Operations
 
 | Concern | Where |

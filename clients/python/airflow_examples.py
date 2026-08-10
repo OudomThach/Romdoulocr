@@ -5,9 +5,10 @@ Each example is a self-contained DAG you can copy into your Airflow dags/ folder
 Prerequisites: pip install requests apache-airflow, then copy metadata.py + romdoul.py
 into dags/ (or your PYTHONPATH).
 
-Credentials: set Airflow Variables or env vars:
+Credentials: set Airflow Variables or env vars (see metadata.py
+airflow_metadata_connection):
   ROMDOUL_META_USER=admin
-  ROMDOUL_META_PASS=romdoul-v1cgt5jkq492dhzymlwr
+  ROMDOUL_META_PASS=<your password from metadata-service/.env>
   ROMDOUL_META_URL=https://romdoulocr.netlify.app/api-meta
 """
 
