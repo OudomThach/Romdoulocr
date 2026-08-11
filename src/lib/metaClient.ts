@@ -214,8 +214,18 @@ export const metaClient = {
     return request('/stats');
   },
   meta(): Promise<{ types: string[]; domains: string[] }> {
-    return request('/meta');
-  },
+      return request('/meta');
+    },
+    // ── managed taxonomy (public reads — drives the dataset form pickers) ──
+    listOrganizations(): Promise<{ id: number; name: string; org_type: string }[]> {
+      return request('/organizations');
+    },
+    listCategories(): Promise<{ id: number; parent_id: number | null; name: string; description: string | null; sort: number }[]> {
+      return request('/categories');
+    },
+    listCollections(): Promise<{ id: number; name: string; description: string | null; organization_id: number | null }[]> {
+      return request('/collections');
+    },
   exportUrl(format: 'csv' | 'json', p: MetaQuery = {}): string {
     return `${META_BASE}/export${qs({ format, ...p })}`;
   },

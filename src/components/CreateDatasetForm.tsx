@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { metaClient } from '@/lib/metaClient';
 
 /**
  * "Create New Public Dataset" form — the post-OCR publishing step.
@@ -173,6 +174,19 @@ export function CreateDatasetForm({
   const [validation, setValidation] = useState<{ ok: boolean; issues: string[] } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Managed taxonomy from the portal — these drive the pickers below.
+  const [orgs, setOrgs] = useState<{ id: number; name: string }[]>([]);
+  const [cats, setCats] = useState<{ id: number; parent_id: number | null; name: string; sort: number }[]>([]);
+  const [cols, setCols] = useState<{ id: number; name: string }[]>([]);
+  const [managedByCustom, setManagedByCustom] = useState(false);
+  const [collectionCustom, setCollectionCustom] = useState(false);
+
+  useEffect(() => {
+    metaClient.listOrganizations().then(setOrgs).catch(() => {});
+    metaClient.listCategories().then(setCats).catch(() => {});
+    metaClient.listCollections().then(setCols).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const d = initial || {};
     setName(String(d.name ?? ''));
@@ -302,7 +316,21 @@ export function CreateDatasetForm({
         </div>
         <div>
           <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Managed by *</label>
-          <input className="input w-56" value={managedBy} onChange={(e) => setManagedBy(e.target.value)} placeholder="e.g. GDDE, MEF" />
+          <select
+            className="input w-56"
+            value={managedByCustom ? '__custom__' : (orgs.some((o) => o.name === managedBy) ? managedBy : (managedBy ? '__custom__' : ''))}
+            onChange={(e) => {
+              if (e.target.value === '__custom__') { setManagedByCustom(true); setManagedBy(''); }
+              else { setManagedByCustom(false); setManagedBy(e.target.value); }
+            }}
+          >
+            <option value="">Select…</option>
+            {orgs.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+            <option value="__custom__">— custom —</option>
+          </select>
+          {managedByCustom && (
+            <input className="input mt-1 w-56" value={managedBy} onChange={(e) => setManagedBy(e.target.value)} placeholder="e.g. GDDE, MEF" />
+          )}
         </div>
         <div>
           <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Frequency *</label>
@@ -319,13 +347,74 @@ export function CreateDatasetForm({
           <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Coverage end</label>
           <input className="input w-36" type="date" value={coverageEnd} onChange={(e) => setCoverageEnd(e.target.value)} />
         </div>
-        <div>
+        <div className="w-full">
           <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Categories *</label>
-          <input className="input w-48" value={categories} onChange={(e) => setCategories(e.target.value)} placeholder="Search by collection name" />
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+            {(() => {
+              const selected = new Set(categories.split(',').map((c) => c.trim()).filter(Boolean));
+              const byParent = new Map<number | null, typeof cats>();
+              for (const c of cats) {
+                byParent.set(c.parent_id, [...(byParent.get(c.parent_id) ?? []), c]);
+              }
+              const ordered: { name: string; depth: number }[] = [];
+              const walk = (parent: number | null, depth: number) => {
+                for (const c of (byParent.get(parent) ?? []).sort((a, b) => a.sort - b.sort)) {
+                  ordered.push({ name: c.name, depth });
+                  walk(c.id, depth + 1);
+                }
+              };
+              walk(null, 0);
+              const toggle = (name: string) => {
+                const next = new Set(selected);
+                if (next.has(name)) next.delete(name); else next.add(name);
+                setCategories([...next].join(', '));
+                setValidation(null);
+              };
+              return ordered.map((c) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  onClick={() => toggle(c.name)}
+                  aria-pressed={selected.has(c.name)}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    selected.has(c.name)
+                      ? 'bg-accent text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                  style={{ marginLeft: `${c.depth * 10}px` }}
+                >
+                  {c.name}
+                </button>
+              ));
+            })()}
+            {cats.length === 0 && (
+              <span className="text-[11px] text-slate-400">No categories yet — add them in the portal's Categories page, or type below.</span>
+            )}
+            <input
+              className="ml-1 w-40 border-0 bg-transparent text-[11px] text-slate-700 outline-none placeholder:text-slate-400"
+              value={categories}
+              onChange={(e) => { setCategories(e.target.value); setValidation(null); }}
+              placeholder="receipt, bank transfer"
+            />
+          </div>
         </div>
         <div>
           <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Collection</label>
-          <input className="input w-48" value={collection} onChange={(e) => setCollection(e.target.value)} placeholder="e.g. NIS Publications" />
+          <select
+            className="input w-56"
+            value={collectionCustom ? '__custom__' : (cols.some((c) => c.name === collection) ? collection : (collection ? '__custom__' : ''))}
+            onChange={(e) => {
+              if (e.target.value === '__custom__') { setCollectionCustom(true); setCollection(''); }
+              else { setCollectionCustom(false); setCollection(e.target.value); }
+            }}
+          >
+            <option value="">Select…</option>
+            {cols.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+            <option value="__custom__">— custom —</option>
+          </select>
+          {collectionCustom && (
+            <input className="input mt-1 w-56" value={collection} onChange={(e) => setCollection(e.target.value)} placeholder="e.g. NIS Publications" />
+          )}
         </div>
         <div className="w-full">
           <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">URL / Source link</label>
