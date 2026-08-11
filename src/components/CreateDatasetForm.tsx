@@ -30,12 +30,17 @@ export interface DatasetPayload {
   url?: string | null;
   description?: string | null;
   file?: DatasetFile | null;
+  /** Raw bytes of the uploaded data file, base64 — only when ≤ EMBED_MAX bytes. */
+  file_base64?: string | null;
 }
 
 const ACCEPTED_EXT = ['.csv', '.geojson', '.kml', '.pdf', '.parquet', '.orc', '.xlsx', '.xls', '.xlsm'];
 const FREQUENCIES = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly', 'Irregular'];
 const DESC_MAX = 1500;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Files up to this size are embedded in the record (base64) so they can be
+ * downloaded from the portal; bigger ones keep name/size only. */
+const EMBED_MAX = 5 * 1024 * 1024;
 
 function fmtStamp(v?: string): string {
   if (!v) return '—';
@@ -162,6 +167,8 @@ export function CreateDatasetForm({
   const [url, setUrl] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<DatasetFile | null>(null);
+  const [fileBase64, setFileBase64] = useState<string | null>(null);
+  const [embedNote, setEmbedNote] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const [validation, setValidation] = useState<{ ok: boolean; issues: string[] } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -178,7 +185,23 @@ export function CreateDatasetForm({
     setUrl(String(d.url ?? ''));
     setDescription(String(d.description ?? ''));
     setFile((d.file as DatasetFile | null) ?? null);
+    setFileBase64(String(d.file_base64 ?? '') || null);
+    setEmbedNote((d.file as DatasetFile | null) ? (String(d.file_base64 ?? '') ? null : 'not embedded (larger than 5 MB)') : null);
   }, [initial]);
+
+  const readFileBase64 = (f: File, cb: (b64: string | null, note: string | null) => void) => {
+    if (f.size > EMBED_MAX) {
+      cb(null, 'too large to embed (name/size saved only)');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? '');
+      cb(dataUrl.includes(',') ? dataUrl.split(',', 2)[1] : dataUrl, null);
+    };
+    reader.onerror = () => cb(null, 'could not read file bytes');
+    reader.readAsDataURL(f);
+  };
 
   const acceptFile = (f: File | undefined | null) => {
     setDropError(null);
@@ -188,7 +211,10 @@ export function CreateDatasetForm({
       return;
     }
     setFile({ name: f.name, size: f.size, type: f.type });
+    setFileBase64(null);
+    setEmbedNote(null);
     setValidation(null);
+    readFileBase64(f, (b64, note) => { setFileBase64(b64); setEmbedNote(note); });
   };
 
   const runValidation = () => {
@@ -245,6 +271,7 @@ export function CreateDatasetForm({
       url: url.trim() || null,
       description: description.trim() || null,
       file,
+      file_base64: fileBase64,
     };
     onSave(payload);
   };
@@ -356,10 +383,13 @@ export function CreateDatasetForm({
             <div className="text-sm">
               <span className="font-medium text-slate-900">{file.name}</span>
               <span className="ml-2 text-xs text-slate-500">{fmtSize(file.size)}</span>
+              <span className={`ml-2 text-xs ${embedNote ? 'text-amber-600' : 'text-emerald-600'}`}>
+                {embedNote ?? 'embedded — downloadable from the portal'}
+              </span>
               <button
                 type="button"
                 className="ml-3 text-xs text-red-500 hover:underline"
-                onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                onClick={(e) => { e.stopPropagation(); setFile(null); setFileBase64(null); setEmbedNote(null); }}
               >
                 remove
               </button>

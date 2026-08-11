@@ -35,6 +35,45 @@ function buildCsv(text: string): string {
   return '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
 }
 
+// --------------------------------------------------------------------------- #
+// Line-level diff (LCS) for the review step: shows what the user changed
+// compared to the original OCR text. Word-level would blow up the DP table on
+// long pages; line-level is cheap and honest for "you changed these lines".
+// --------------------------------------------------------------------------- #
+type DiffLine = { kind: 'same' | 'del' | 'add'; text: string };
+
+function diffLines(a: string, b: string): DiffLine[] {
+  const al = a.split('\n');
+  const bl = b.split('\n');
+  const n = al.length;
+  const m = bl.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = al[i] === bl[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (al[i] === bl[j]) {
+      out.push({ kind: 'same', text: al[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ kind: 'del', text: al[i] });
+      i++;
+    } else {
+      out.push({ kind: 'add', text: bl[j] });
+      j++;
+    }
+  }
+  while (i < n) out.push({ kind: 'del', text: al[i++] });
+  while (j < m) out.push({ kind: 'add', text: bl[j++] });
+  return out;
+}
+
 export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const last = useMetadataStore((s) => s.get(filename ?? null));
   const patchSummary = useMetadataStore((s) => s.patchSummary);
@@ -56,6 +95,8 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState('');
 
   const applyRecord = (rec: { data?: Record<string, unknown>; created_at?: string; audit?: { edited_at?: string } | null }) => {
     const fullText = ((rec.data?.full_text as string) ?? '').trim();
@@ -65,6 +106,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     setOriginalText(fullText);
     setCreatedAt(rec.created_at ?? '');
     setUpdatedAt(rec.audit?.edited_at ?? '');
+    setDraftSavedAt(rec.audit?.edited_at ?? rec.created_at ?? '');
   };
 
   // Auto-expand the review gate on freshly-extracted records so users verify
@@ -154,6 +196,16 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           <div className="mt-0.5 truncate font-mono text-[11px] text-slate-500">{last.id}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canEdit && !editing && last.status === 'raw' && (
+            <button
+              type="button"
+              className="btn-secondary px-3 py-1.5 text-xs"
+              onClick={() => void startEdit()}
+              title={draftSavedAt ? `Draft saved ${draftSavedAt.replace('T', ' ').slice(0, 16)} — resume the review` : 'Resume the verification review'}
+            >
+              ⏎ Resume review
+            </button>
+          )}
           {canEdit ? (
             <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => void startEdit()} disabled={saving}>
               {editing ? 'Close' : 'Edit'}
@@ -181,24 +233,49 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
               <div className="rounded-xl border border-slate-200 bg-white/70 p-4">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <div className="text-sm font-semibold text-slate-900">Review OCR text</div>
-                  <button
-                    type="button"
-                    className="btn-ghost px-2 py-0.5 text-[11px]"
-                    onClick={() => setReviewText(originalText)}
-                    disabled={reviewText === originalText}
-                  >
-                    Restore original
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {reviewText !== originalText && (
+                      <button
+                        type="button"
+                        className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${showDiff ? 'bg-accent2/10 text-accent2' : 'bg-slate-100 text-slate-600 hover:text-slate-950'}`}
+                        onClick={() => setShowDiff(!showDiff)}
+                      >
+                        {showDiff ? 'Hide changes' : `Show changes (${diffLines(originalText, reviewText).filter((l) => l.kind !== 'same').length})`}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-ghost px-2 py-0.5 text-[11px]"
+                      onClick={() => setReviewText(originalText)}
+                      disabled={reviewText === originalText}
+                    >
+                      Restore original
+                    </button>
+                  </div>
                 </div>
                 <p className="mb-2 text-xs text-slate-500">Correct any misreads before saving — numbers, dates, names and totals.</p>
-                <textarea
-                  className="input min-h-32 w-full resize-y text-sm leading-relaxed"
-                  style={{ fontFamily: "'Noto Sans Khmer', 'Khmer OS Siemreap', 'Segoe UI', sans-serif" }}
-                  value={reviewText}
-                  onChange={(e) => setReviewText(e.target.value)}
-                  spellCheck={false}
-                  placeholder="OCR text…"
-                />
+                {showDiff && reviewText !== originalText ? (
+                  <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed">
+                    {diffLines(originalText, reviewText).map((line, idx) => {
+                      if (line.kind === 'same') {
+                        return <div key={idx} className="text-slate-400">{line.text || ' '}</div>;
+                      }
+                      if (line.kind === 'del') {
+                        return <div key={idx} className="bg-red-50 text-red-600 line-through dark:bg-red-500/10">{line.text || ' '}</div>;
+                      }
+                      return <div key={idx} className="bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10">{line.text || ' '}</div>;
+                    })}
+                  </div>
+                ) : (
+                  <textarea
+                    className="input min-h-32 w-full resize-y text-sm leading-relaxed"
+                    style={{ fontFamily: "'Noto Sans Khmer', 'Khmer OS Siemreap', 'Segoe UI', sans-serif" }}
+                    value={reviewText}
+                    onChange={(e) => setReviewText(e.target.value)}
+                    spellCheck={false}
+                    placeholder="OCR text…"
+                  />
+                )}
                 <div className="mt-1 flex justify-end text-[11px] text-slate-400">
                   {reviewText === originalText ? 'original (unchanged)' : `${reviewText.length} chars — edited`}
                 </div>
