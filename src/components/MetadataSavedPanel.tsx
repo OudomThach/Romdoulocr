@@ -4,15 +4,37 @@ import { useMetaAuth } from '@/lib/useMetaAuth';
 import { metaClient } from '@/lib/metaClient';
 import { LoginModal } from '@/components/LoginModal';
 import { CreateDatasetForm, type DatasetPayload } from '@/components/CreateDatasetForm';
+import { parsePipeTable } from '@/lib/tableExport';
 import { useSettingsStore } from '@/hooks/useSettingsStore';
 import { useToastStore } from '@/hooks/useToastStore';
 
 /**
- * Inline panel after a parse: shows saved status + [Edit] to expand the
- * Create New Public Dataset form. The dataset metadata is stored on the
- * record under `data.dataset`. The raw OCR fields live in the portal's
- * Full record page; inline OCR text correction is EditableOcrText.
+ * Inline panel after a parse: the forced Review & Save gate.
+ *
+ * The extraction is auto-saved as a `raw` draft the moment OCR finishes; this
+ * panel makes the user VERIFY before the record counts:
+ *   ① review/correct the OCR text,
+ *   ② confirm the dataset metadata,
+ *   ③ tick "I verified the text and metadata" — Save stays blocked until then.
+ *
+ * On save the record is PATCHed with the CORRECTED text plus auto-generated
+ * `markdown` and `csv` of the final text (original if nothing was edited), and
+ * the audit trail flips status raw → edited.
  */
+
+function buildCsv(text: string): string {
+  const esc = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const rows: string[][] = [];
+  const parsed = parsePipeTable(text);
+  if (parsed && parsed.rows.length > 0) {
+    rows.push(parsed.headers, ...parsed.rows);
+  } else {
+    rows.push(...text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => [l]));
+  }
+  // BOM so Excel renders Khmer correctly; CRLF per RFC 4180.
+  return '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+
 export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const last = useMetadataStore((s) => s.get(filename ?? null));
   const patchSummary = useMetadataStore((s) => s.patchSummary);
@@ -26,27 +48,34 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [editing, setEditing] = useState(false);
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [dataset, setDataset] = useState<Record<string, unknown> | null>(null);
+  const [reviewText, setReviewText] = useState('');
+  const [originalText, setOriginalText] = useState('');
+  const [verifyChecked, setVerifyChecked] = useState(false);
   const [createdAt, setCreatedAt] = useState('');
   const [updatedAt, setUpdatedAt] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Auto-expand the form on freshly-extracted records so users can complete
-  // the dataset metadata right after extraction without an extra click.
-  // MUST be before the conditional return — React hooks are positional.
+  const applyRecord = (rec: { data?: Record<string, unknown>; created_at?: string; audit?: { edited_at?: string } | null }) => {
+    const fullText = ((rec.data?.full_text as string) ?? '').trim();
+    setData(rec.data ?? {});
+    setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
+    setReviewText(fullText);
+    setOriginalText(fullText);
+    setCreatedAt(rec.created_at ?? '');
+    setUpdatedAt(rec.audit?.edited_at ?? '');
+  };
+
+  // Auto-expand the review gate on freshly-extracted records so users verify
+  // right after extraction. MUST be before the conditional return.
   useEffect(() => {
     if (!last || !last.justCreated || !canEdit) return;
     markOpened(last.id);
     setEditing(true);
     if (!data) {
       setLoading(true);
-      metaClient.getRecord(last.id).then((rec) => {
-        setData(rec.data);
-        setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
-        setCreatedAt(rec.created_at ?? '');
-        setUpdatedAt((rec.audit?.edited_at as string) ?? '');
-      }).catch(() => {})
+      metaClient.getRecord(last.id).then(applyRecord).catch(() => {})
         .finally(() => setLoading(false));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -60,11 +89,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     setLoading(true);
     setError(null);
     try {
-      const rec = await metaClient.getRecord(last.id);
-      setData(rec.data);
-      setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
-      setCreatedAt(rec.created_at ?? '');
-      setUpdatedAt((rec.audit?.edited_at as string) ?? '');
+      applyRecord(await metaClient.getRecord(last.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load record');
     } finally {
@@ -72,28 +97,36 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     }
   };
 
-  const patch = async (nextData: Record<string, unknown>) => {
+  // The single save path for the whole review gate. Blocked until the user
+  // has ticked the verification checkbox.
+  const save = async (payload: DatasetPayload) => {
+    if (!verifyChecked) {
+      setError('Please tick "I verified the text and metadata" before saving.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
+      const finalText = reviewText.trim() || originalText;
+      const nextData: Record<string, unknown> = {
+        ...(data ?? {}),
+        full_text: finalText,
+        markdown: finalText,
+        csv: buildCsv(finalText),
+        dataset: { ...(dataset ?? {}), ...payload },
+      };
       const rec = await metaClient.patchRecord(last.id, { data: nextData });
       setData(rec.data);
       setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
       setUpdatedAt((rec.audit?.edited_at as string) ?? '');
       patchSummary(last.id, { status: 'edited' });
-      toast('Saved — status: edited', 'success');
+      toast('Saved — CSV + Markdown generated, status: edited', 'success');
+      setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSaving(false);
     }
-  };
-
-  // DataFormEditor is gone from this panel (portal Full record owns the raw
-  // fields); `data` is kept for merging the dataset payload on save.
-  const saveDataset = async (payload: DatasetPayload) => {
-    if (!data) return;
-    await patch({ ...data, dataset: { ...(dataset ?? {}), ...payload } });
   };
 
   const openFull = () => {
@@ -144,14 +177,74 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
           {error && <p className="text-sm text-red-500">{error}</p>}
           {data && !loading && (
             <>
+              {/* ① Review / correct the OCR text */}
+              <div className="rounded-xl border border-slate-200 bg-white/70 p-4">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="text-sm font-semibold text-slate-900">Review OCR text</div>
+                  <button
+                    type="button"
+                    className="btn-ghost px-2 py-0.5 text-[11px]"
+                    onClick={() => setReviewText(originalText)}
+                    disabled={reviewText === originalText}
+                  >
+                    Restore original
+                  </button>
+                </div>
+                <p className="mb-2 text-xs text-slate-500">Correct any misreads before saving — numbers, dates, names and totals.</p>
+                <textarea
+                  className="input min-h-32 w-full resize-y text-sm leading-relaxed"
+                  style={{ fontFamily: "'Noto Sans Khmer', 'Khmer OS Siemreap', 'Segoe UI', sans-serif" }}
+                  value={reviewText}
+                  onChange={(e) => setReviewText(e.target.value)}
+                  spellCheck={false}
+                  placeholder="OCR text…"
+                />
+                <div className="mt-1 flex justify-end text-[11px] text-slate-400">
+                  {reviewText === originalText ? 'original (unchanged)' : `${reviewText.length} chars — edited`}
+                </div>
+              </div>
+
+              {/* ② Dataset metadata */}
               <CreateDatasetForm
                 initial={dataset}
-                text={(data?.full_text as string) ?? ''}
+                text={reviewText}
                 createdAt={createdAt}
                 updatedAt={updatedAt}
                 saving={saving}
-                onSave={saveDataset}
+                onSave={save}
               />
+
+              {/* ③ Verification gate */}
+              <div className={`rounded-xl border p-4 ${verifyChecked ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-300 bg-amber-50/60'}`}>
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={verifyChecked}
+                    onChange={(e) => { setVerifyChecked(e.target.checked); setError(null); }}
+                    className="mt-0.5 rounded border-slate-300"
+                  />
+                  <span className="text-sm text-slate-700">
+                    <span className="font-semibold text-slate-900">I verified the OCR text and metadata</span>
+                    <span className="ml-1 text-red-500">*</span>
+                    <span className="block text-xs text-slate-500">
+                      Recheck the text against the original before saving — OCR can misread stacked Khmer consonants,
+                      faint scans and table cells. Pay closest attention to numbers, dates, names and totals.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="btn-primary px-4 py-2 text-sm"
+                  disabled={!verifyChecked || saving}
+                  onClick={() => void save({})}
+                  title={verifyChecked ? 'Save corrected text + metadata (auto-generates CSV & Markdown)' : 'Tick the verification box first'}
+                >
+                  {saving ? 'Saving…' : 'Verify & Save'}
+                </button>
+              </div>
             </>
           )}
         </div>
