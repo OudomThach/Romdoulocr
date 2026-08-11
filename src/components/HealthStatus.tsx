@@ -13,7 +13,7 @@ const BACKEND_LABEL: Record<BackendId, string> = {
 
 export function HealthStatus() {
   const backend = useSyncExternalStore(subscribeBackend, getBackend, () => 'default' as BackendId);
-  const { data, isLoading, isError } = useBackendsHealth()[backend];
+  const { data, isLoading, isError, error } = useBackendsHealth()[backend];
   const name = BACKEND_LABEL[backend];
 
   if (isLoading) {
@@ -26,6 +26,17 @@ export function HealthStatus() {
   }
 
   if (isError || !data) {
+    // The vLLM adapter answers 503 while the GPU is loading its model (~2 min
+    // cold start) — that's "warming", not "down". 502/refused is a real outage.
+    const warming = backend === 'vllm' && /50[23]/.test(String((error as Error | null)?.message ?? ''));
+    if (warming) {
+      return (
+        <span className="badge border-amber-200 bg-amber-50 text-amber-700" title="The Surya OCR 2 model is loading on the GPU — requests wait, then run normally (~2 min).">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+          Surya OCR 2 waking up (~2 min)
+        </span>
+      );
+    }
     return (
       <span
         className="badge border-rose-200 bg-rose-50 text-rose-700"

@@ -44,6 +44,8 @@ export function OcrImageTab() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [preparingMsg, setPreparingMsg] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  // First-visit onboarding: shown once, dismissed by "Got it" or "Try a sample".
+  const [onboarded, setOnboarded] = useState<boolean>(() => localStorage.getItem('romdoul_onboarded_v1') === '1');
   // File currently open in the CamScanner-style crop modal.
   const [scanFile, setScanFile] = useState<File | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -221,6 +223,45 @@ export function OcrImageTab() {
     e.target.value = ''; // allow re-shooting the same file
   };
 
+  const markOnboarded = () => {
+    localStorage.setItem('romdoul_onboarded_v1', '1');
+    setOnboarded(true);
+  };
+
+  // Render a tiny sample invoice as a PNG and OCR it — one click tour of the
+  // whole flow (upload -> instant OCR -> review -> publish).
+  const trySample = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 220;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#111827';
+    ctx.font = 'bold 28px sans-serif';
+    ctx.fillText('Sample Invoice', 24, 44);
+    ctx.font = '20px sans-serif';
+    const rows: [string, string, string][] = [
+      ['Item', 'Qty', 'Price'],
+      ['Rice', '10', '2,500'],
+      ['Fish', '3', '18,000'],
+      ['Total', '', '20,500'],
+    ];
+    let y = 90;
+    for (const [a, b, c] of rows) {
+      ctx.fillText(a, 24, y);
+      ctx.fillText(b, 220, y);
+      ctx.fillText(c, 360, y);
+      y += 30;
+    }
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      setFiles([new File([blob], 'sample-invoice.png', { type: 'image/png' })]);
+      markOnboarded();
+    }, 'image/png');
+  };
+
   return (
     // Mobile-first: one centered column; comfortable thumb targets throughout.
     <div className="mx-auto w-full max-w-3xl text-slate-950">
@@ -240,6 +281,25 @@ export function OcrImageTab() {
         <section className="panel-raised rise-in p-5 sm:p-8">
           <h2 className="display">{t('ocr.title')}</h2>
           <p className="mt-1 text-sm text-slate-500">{t('ocr.subtitle')}</p>
+
+          {!onboarded && (
+            <div className="mt-5 rounded-xl border border-accent/30 bg-accent/5 p-4">
+              <div className="text-sm font-semibold text-slate-900">How it works</div>
+              <ol className="mt-2 space-y-1 text-sm text-slate-600">
+                <li><span className="font-medium text-accent">1.</span> Upload, scan or paste a document — OCR starts instantly</li>
+                <li><span className="font-medium text-accent">2.</span> Review the text, fix any misreads</li>
+                <li><span className="font-medium text-accent">3.</span> Verify &amp; save — CSV + Markdown are generated automatically</li>
+              </ol>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={trySample}>
+                  ✨ Try a sample document
+                </button>
+                <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={markOnboarded}>
+                  Got it
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="mt-5">
             <FileDropzone

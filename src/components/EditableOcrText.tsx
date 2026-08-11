@@ -41,9 +41,18 @@ export function EditableOcrText({
     setError(null);
     try {
       const rec = await metaClient.getRecord(last.id);
-      await metaClient.patchRecord(last.id, { data: { ...rec.data, full_text: draft } });
+      const prevData = { ...rec.data };
+      await metaClient.patchRecord(last.id, { data: { ...prevData, full_text: draft } });
       patchSummary(last.id, { status: 'edited' });
-      toast('OCR text saved — status: edited', 'success');
+      toast('OCR text saved — status: edited', 'success', {
+        label: 'Undo',
+        run: () => {
+          void metaClient.patchRecord(last.id, { data: prevData }).then(() => {
+            patchSummary(last.id, { status: 'raw' });
+            toast('Reverted — OCR text restored', 'info');
+          }).catch(() => toast('Undo failed', 'error'));
+        },
+      });
       setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');

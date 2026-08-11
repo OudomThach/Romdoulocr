@@ -11,6 +11,7 @@ import { DocumentSearch } from '@/components/DocumentSearch';
 import { PagePreview } from '@/components/PagePreview';
 import { ResultStepper } from '@/components/ResultStepper';
 import { ProgressBar } from '@/components/ProgressBar';
+import { EtaText } from '@/components/EtaText';
 import { useBatchProcessor } from '@/hooks/useBatchProcessor';
 import { useHistoryAutoSave } from '@/hooks/useHistoryAutoSave';
 import { usePagePreviews } from '@/hooks/usePagePreviews';
@@ -466,7 +467,10 @@ export function TranslatedTab() {
           (batch.progress.active <= 1 && progress !== null ? (
             <ProgressBar value={progress} label="Uploading to API..." />
           ) : (
-            <ProgressBar value={null} label={`Translating ${batch.progress.active} files... (${batch.progress.done} done)`} />
+            <>
+              <ProgressBar value={null} label={`Translating ${batch.progress.active} files... (${batch.progress.done} done)`} />
+              <EtaText done={batch.progress.done} total={batch.progress.total} />
+            </>
           ))}
         {batch.hasErrors && batch.items.some((it) => it.status === 'error' && it.error) && (
           <ErrorBanner error={batch.items.find((it) => it.status === 'error' && it.error)?.error} />

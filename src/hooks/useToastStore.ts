@@ -4,15 +4,22 @@ import { create } from 'zustand';
 // call `toast.push(...)` (or the helpers `toast.success` / `toast.error`)
 // and the <Toaster /> mounted at the app root renders them.
 
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface ToastItem {
   id: number;
   message: string;
   variant: 'success' | 'error' | 'info';
+  /** Optional action button (e.g. "Undo"); the toast stays longer when set. */
+  action?: ToastAction;
 }
 
 interface ToastState {
   items: ToastItem[];
-  push: (message: string, variant?: ToastItem['variant']) => void;
+  push: (message: string, variant?: ToastItem['variant'], action?: ToastAction) => void;
   dismiss: (id: number) => void;
 }
 
@@ -20,14 +27,14 @@ let nextId = 1;
 
 export const useToastStore = create<ToastState>((set) => ({
   items: [],
-  push: (message, variant = 'info') => {
+  push: (message, variant = 'info', action) => {
     const id = nextId++;
-    set((s) => ({ items: [...s.items, { id, message, variant }] }));
-    // Auto-dismiss after 2.2s. We don't store the timer in state to avoid
-    // re-renders; the Toaster's per-item effect handles cleanup.
+    set((s) => ({ items: [...s.items, { id, message, variant, action }] }));
+    // With an action (undo) give the user time to click it; otherwise dismiss fast.
+    const delay = action ? 6000 : 2200;
     window.setTimeout(() => {
       set((s) => ({ items: s.items.filter((it) => it.id !== id) }));
-    }, 2200);
+    }, delay);
   },
   dismiss: (id) => set((s) => ({ items: s.items.filter((it) => it.id !== id) })),
 }));

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
+import { EtaText } from '@/components/EtaText';
 import { api } from '@/lib/api';
 import type { BackendId } from '@/lib/backend';
 import { FileDropzone } from '@/components/FileDropzone';
@@ -1159,6 +1160,7 @@ export function CompareTab() {
               {progress && (
                 <span className="tabular-nums font-medium text-slate-600">
                   File {progress.done}/{progress.total}
+                  <EtaText done={progress.done} total={progress.total} />
                 </span>
               )}
               {stage && (

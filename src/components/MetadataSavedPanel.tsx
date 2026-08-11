@@ -150,8 +150,9 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     setError(null);
     try {
       const finalText = reviewText.trim() || originalText;
+      const prevData = { ...(data ?? {}) };
       const nextData: Record<string, unknown> = {
-        ...(data ?? {}),
+        ...prevData,
         full_text: finalText,
         markdown: finalText,
         csv: buildCsv(finalText),
@@ -162,7 +163,15 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
       setUpdatedAt((rec.audit?.edited_at as string) ?? '');
       patchSummary(last.id, { status: 'edited' });
-      toast('Saved — CSV + Markdown generated, status: edited', 'success');
+      toast('Saved — CSV + Markdown generated, status: edited', 'success', {
+        label: 'Undo',
+        run: () => {
+          void metaClient.patchRecord(last.id, { data: prevData }).then(() => {
+            patchSummary(last.id, { status: 'raw' });
+            toast('Reverted — draft restored', 'info');
+          }).catch(() => toast('Undo failed', 'error'));
+        },
+      });
       setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');

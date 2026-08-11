@@ -6,6 +6,7 @@ import { FileDropzone } from '@/components/FileDropzone';
 import { FileReadyPanel } from '@/components/FileReadyPanel';
 import { MarkdownView } from '@/components/MarkdownView';
 import { ProgressBar } from '@/components/ProgressBar';
+import { EtaText } from '@/components/EtaText';
 import { TableGrid } from '@/components/TableGrid';
 import { TidyPanel } from '@/components/TidyPanel';
 import { useHistory } from '@/hooks/useHistory';
@@ -337,10 +338,13 @@ export function TableParserTab() {
           batch.progress.active <= 1 && progress !== null ? (
             <ProgressBar value={progress} label="Uploading to API..." />
           ) : (
-            <ProgressBar
-              value={null}
-              label={`Processing ${batch.progress.active} files... (${batch.progress.done} done)`}
-            />
+            <>
+              <ProgressBar
+                value={null}
+                label={`Processing ${batch.progress.active} files... (${batch.progress.done} done)`}
+              />
+              <EtaText done={batch.progress.done} total={batch.progress.total} />
+            </>
           )
         )}
         {prepError && <ErrorBanner error={new Error(prepError)} />}
