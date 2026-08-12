@@ -32,11 +32,16 @@ type DiffLine = { kind: 'same' | 'del' | 'add'; text: string };
 
 /** Pipe-table text -> grid rows (for the Table editing view). */
 function parsePipeRows(text: string): string[][] {
-  const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.includes('|'));
-  const rows = lines
-    .map((l) => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()))
-    .filter((r) => r.some((c) => c));
-  return rows;
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const pipe = lines.filter((l) => l.includes('|'));
+  const tabbed = lines.filter((l) => l.includes('\t'));
+  const src = pipe.length >= 2 ? pipe : tabbed;
+  const rows = src.map((l) =>
+    l.includes('|')
+      ? l.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+      : l.split('\t').map((c) => c.trim()),
+  );
+  return rows.filter((r) => r.some((c) => c));
 }
 
 /** Pipe-table text -> (headers, rows) for the Table editing view. The first

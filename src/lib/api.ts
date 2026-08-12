@@ -92,7 +92,9 @@ function reportExtraction(
       ? data.full_text.slice(0, 50_000)
       : typeof data.text === 'string'
         ? data.text.slice(0, 50_000)
-        : undefined;
+        : typeof data.structured_text === 'string'
+          ? data.structured_text.slice(0, 50_000)
+          : undefined;
   const resolved = backend ?? getBackend();
   const ext = filename && filename.includes('.') ? filename.split('.').pop()?.toLowerCase() ?? null : null;
 
