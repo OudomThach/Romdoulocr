@@ -12,15 +12,15 @@ import { useToastStore } from '@/hooks/useToastStore';
  * Inline panel after a parse: the forced Review & Save gate.
  *
  * The extraction is auto-saved as a `raw` draft the moment OCR finishes (with
- * markdown/csv/json artifacts â€” see lib/api.ts reportExtraction); this panel
+ * markdown/csv/json artifacts — see lib/api.ts reportExtraction); this panel
  * makes the user VERIFY before the record counts:
- *   â‘  review/correct the OCR text,
- *   â‘¡ confirm the dataset metadata,
- *   â‘¢ tick "I verified the text and metadata" â€” Save stays blocked until then.
+ *   ① review/correct the OCR text,
+ *   ② confirm the dataset metadata,
+ *   ③ tick "I verified the text and metadata" — Save stays blocked until then.
  *
  * On save the record is PATCHed with the CORRECTED text plus regenerated
  * `markdown` and `csv` of the final text (original if nothing was edited), and
- * the audit trail flips status raw â†’ edited.
+ * the audit trail flips status raw → edited.
  */
 
 // --------------------------------------------------------------------------- #
@@ -39,12 +39,23 @@ function parsePipeRows(text: string): string[][] {
   return rows;
 }
 
-/** Grid rows -> pipe-table markdown text (back into the review textarea). */
-function rowsToMarkdown(rows: string[][]): string {
-  if (rows.length === 0) return '';
-  const width = Math.max(...rows.map((r) => r.length));
+/** Pipe-table text -> (headers, rows) for the Table editing view. The first
+ * pipe row is treated as the header (renameable in the grid). */
+function parseTable(text: string): { headers: string[]; rows: string[][] } {
+  const all = parsePipeRows(text);
+  const headers = all[0] ?? [];
+  const rows = all.slice(1);
+  return { headers, rows };
+}
+
+/** Headers + rows -> pipe-table markdown text (back into the review textarea). */
+function tableToMarkdown(headers: string[], rows: string[][]): string {
+  const width = Math.max(headers.length, 1, ...rows.map((r) => r.length));
   const pad = (r: string[]) => [...r, ...Array<string>(Math.max(0, width - r.length)).fill('')];
-  return rows.map((r) => `| ${pad(r).join(' | ')} |`).join('\n');
+  const headerLine = `| ${pad(headers).join(' | ')} |`;
+  const sepLine = `| ${Array<string>(width).fill('---').join(' | ')} |`;
+  const body = rows.map((r) => `| ${pad(r).join(' | ')} |`);
+  return [headerLine, sepLine, ...body].join('\n');
 }
 
 function diffLines(a: string, b: string): DiffLine[] {
@@ -96,6 +107,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [originalText, setOriginalText] = useState('');
   const [verifyChecked, setVerifyChecked] = useState(false);
   const [reviewView, setReviewView] = useState<'text' | 'table'>('text');
+  const [tableHeaders, setTableHeaders] = useState<string[]>([]);
   const [tableRows, setTableRows] = useState<string[][]>([]);
   const [createdAt, setCreatedAt] = useState('');
   const [updatedAt, setUpdatedAt] = useState('');
@@ -111,7 +123,9 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
     setReviewText(fullText);
     setOriginalText(fullText);
-    setTableRows(parsePipeRows(fullText));
+    const { headers, rows } = parseTable(fullText);
+    setTableHeaders(headers);
+    setTableRows(rows);
     setCreatedAt(rec.created_at ?? '');
     setUpdatedAt(rec.audit?.edited_at ?? '');
     setDraftSavedAt(rec.audit?.edited_at ?? rec.created_at ?? '');
@@ -171,12 +185,12 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
       setUpdatedAt((rec.audit?.edited_at as string) ?? '');
       patchSummary(last.id, { status: 'edited' });
-      toast('Saved â€” CSV + Markdown generated, status: edited', 'success', {
+      toast('Saved — CSV + Markdown generated, status: edited', 'success', {
         label: 'Undo',
         run: () => {
           void metaClient.patchRecord(last.id, { data: prevData }).then(() => {
             patchSummary(last.id, { status: 'raw' });
-            toast('Reverted â€” draft restored', 'info');
+            toast('Reverted — draft restored', 'info');
           }).catch(() => toast('Undo failed', 'error'));
         },
       });
@@ -218,9 +232,9 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
               type="button"
               className="btn-secondary px-3 py-1.5 text-xs"
               onClick={() => void startEdit()}
-              title={draftSavedAt ? `Draft saved ${draftSavedAt.replace('T', ' ').slice(0, 16)} â€” resume the review` : 'Resume the verification review'}
+              title={draftSavedAt ? `Draft saved ${draftSavedAt.replace('T', ' ').slice(0, 16)} — resume the review` : 'Resume the verification review'}
             >
-              âŽ Resume review
+              ⏎ Resume review
             </button>
           )}
           {canEdit ? (
@@ -242,11 +256,11 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
 
       {editing && (
         <div className="border-t border-slate-200 bg-white/60 px-4 py-3 space-y-3">
-          {loading && <p className="text-sm text-slate-500">Loadingâ€¦</p>}
+          {loading && <p className="text-sm text-slate-500">Loading…</p>}
           {error && <p className="text-sm text-red-500">{error}</p>}
           {data && !loading && (
             <>
-              {/* â‘  Review / correct the OCR text */}
+              {/* ① Review / correct the OCR text */}
               <div className="rounded-xl border border-slate-200 bg-white/70 p-4">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -288,7 +302,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                     </button>
                   </div>
                 </div>
-                <p className="mb-2 text-xs text-slate-500">Correct any misreads before saving â€” numbers, dates, names and totals.</p>
+                <p className="mb-2 text-xs text-slate-500">Correct any misreads before saving — numbers, dates, names and totals.</p>
                 {showDiff && reviewView === 'text' && reviewText !== originalText ? (
                   <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed">
                     {diffLines(originalText, reviewText).map((line, idx) => {
@@ -304,6 +318,48 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                 ) : reviewView === 'table' ? (
                   <div className="overflow-x-auto rounded-lg border border-slate-200">
                     <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50">
+                          {tableHeaders.map((h, c) => (
+                            <th key={c} className="border-r border-slate-200 px-1 py-1 last:border-r-0">
+                              <div className="flex items-center gap-0.5">
+                                <input
+                                  className="input w-full min-w-24 py-1 text-xs font-semibold"
+                                  placeholder={`Column ${c + 1}`}
+                                  value={h}
+                                  onChange={(e) => {
+                                    const next = tableHeaders.map((x, ci) => (ci === c ? e.target.value : x));
+                                    setTableHeaders(next);
+                                    setReviewText(tableToMarkdown(next, tableRows));
+                                  }}
+                                />
+                                <span className="flex shrink-0 flex-col">
+                                  <button type="button" className="px-0.5 text-[9px] text-slate-400 hover:text-slate-700" disabled={c === 0}
+                                    onClick={() => {
+                                      const hs = [...tableHeaders]; const rs = tableRows.map((x) => [...x]);
+                                      [hs[c - 1], hs[c]] = [hs[c], hs[c - 1]];
+                                      for (const r of rs) [r[c - 1], r[c]] = [r[c], r[c - 1]];
+                                      setTableHeaders(hs); setTableRows(rs); setReviewText(tableToMarkdown(hs, rs));
+                                    }}>▲</button>
+                                  <button type="button" className="px-0.5 text-[9px] text-slate-400 hover:text-slate-700" disabled={c === tableHeaders.length - 1}
+                                    onClick={() => {
+                                      const hs = [...tableHeaders]; const rs = tableRows.map((x) => [...x]);
+                                      [hs[c + 1], hs[c]] = [hs[c], hs[c + 1]];
+                                      for (const r of rs) [r[c + 1], r[c]] = [r[c], r[c + 1]];
+                                      setTableHeaders(hs); setTableRows(rs); setReviewText(tableToMarkdown(hs, rs));
+                                    }}>▼</button>
+                                  <button type="button" className="px-0.5 text-[9px] text-red-400 hover:text-red-600"
+                                    onClick={() => {
+                                      const hs = tableHeaders.filter((_, ci) => ci !== c);
+                                      const rs = tableRows.map((x) => x.filter((_, ci) => ci !== c));
+                                      setTableHeaders(hs); setTableRows(rs); setReviewText(tableToMarkdown(hs, rs));
+                                    }}>✕</button>
+                                </span>
+                              </div>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
                       <tbody>
                         {tableRows.map((row, r) => {
                           const width = Math.max(1, ...tableRows.map((x) => x.length));
@@ -321,14 +377,14 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                                         return ri === r ? p.map((v, ci) => (ci === c ? e.target.value : v)) : x;
                                       });
                                       setTableRows(next);
-                                      setReviewText(rowsToMarkdown(next));
+                                      setReviewText(tableToMarkdown(tableHeaders, next));
                                     }}
                                   />
                                 </td>
                               ))}
                               <td className="w-8 px-1">
                                 <button type="button" className="rounded px-1 text-xs text-red-400 hover:bg-red-50 hover:text-red-600"
-                                  onClick={() => { const next = tableRows.filter((_, ri) => ri !== r); setTableRows(next); setReviewText(rowsToMarkdown(next)); }}>
+                                  onClick={() => { const next = tableRows.filter((_, ri) => ri !== r); setTableRows(next); setReviewText(tableToMarkdown(tableHeaders, next)); }}>
                                   ✕
                                 </button>
                               </td>
@@ -340,18 +396,19 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                     <div className="flex items-center gap-2 border-t border-slate-200 bg-slate-50 px-2 py-1.5">
                       <button type="button" className="btn-secondary px-2.5 py-1 text-[11px]"
                         onClick={() => {
-                          const width = Math.max(1, ...tableRows.map((x) => x.length));
+                          const width = Math.max(1, tableHeaders.length, ...tableRows.map((x) => x.length));
                           const next = [...tableRows, Array<string>(width).fill('')];
                           setTableRows(next);
-                          setReviewText(rowsToMarkdown(next));
+                          setReviewText(tableToMarkdown(tableHeaders, next));
                         }}>
                         + row
                       </button>
                       <button type="button" className="btn-secondary px-2.5 py-1 text-[11px]"
                         onClick={() => {
+                          setTableHeaders((hs) => [...hs, '']);
                           const next = tableRows.map((x) => [...x, '']);
                           setTableRows(next);
-                          setReviewText(rowsToMarkdown(next));
+                          setReviewText(tableToMarkdown([...tableHeaders, ''], next));
                         }}>
                         + column
                       </button>
@@ -369,11 +426,11 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                   />
                 )}
                 <div className="mt-1 flex justify-end text-[11px] text-slate-400">
-                  {reviewText === originalText ? 'original (unchanged)' : `${reviewText.length} chars â€” edited`}
+                  {reviewText === originalText ? 'original (unchanged)' : `${reviewText.length} chars — edited`}
                 </div>
               </div>
 
-              {/* â‘¡ Dataset metadata */}
+              {/* ② Dataset metadata */}
               <CreateDatasetForm
                 initial={dataset}
                 text={reviewText}
@@ -383,7 +440,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                 onSave={save}
               />
 
-              {/* â‘¢ Verification gate */}
+              {/* ③ Verification gate */}
               <div className={`rounded-xl border p-4 ${verifyChecked ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-300 bg-amber-50/60'}`}>
                 <label className="flex cursor-pointer items-start gap-2">
                   <input
@@ -396,7 +453,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                     <span className="font-semibold text-slate-900">I verified the OCR text and metadata</span>
                     <span className="ml-1 text-red-500">*</span>
                     <span className="block text-xs text-slate-500">
-                      Recheck the text against the original before saving â€” OCR can misread stacked Khmer consonants,
+                      Recheck the text against the original before saving — OCR can misread stacked Khmer consonants,
                       faint scans and table cells. Pay closest attention to numbers, dates, names and totals.
                     </span>
                   </span>
@@ -411,7 +468,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                   onClick={() => void save({})}
                   title={verifyChecked ? 'Save corrected text + metadata (auto-generates CSV & Markdown)' : 'Tick the verification box first'}
                 >
-                  {saving ? 'Savingâ€¦' : 'Verify & Save'}
+                  {saving ? 'Saving…' : 'Verify & Save'}
                 </button>
               </div>
             </>
