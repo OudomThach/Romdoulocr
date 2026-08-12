@@ -226,6 +226,9 @@ export const metaClient = {
     listCollections(): Promise<{ id: number; name: string; description: string | null; organization_id: number | null }[]> {
       return request('/collections');
     },
+    listSettings(): Promise<{ key: string; value: Record<string, unknown> | null }[]> {
+      return request('/settings');
+    },
   exportUrl(format: 'csv' | 'json', p: MetaQuery = {}): string {
     return `${META_BASE}/export${qs({ format, ...p })}`;
   },

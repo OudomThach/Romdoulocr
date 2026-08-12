@@ -178,6 +178,8 @@ export function CreateDatasetForm({
   const [orgs, setOrgs] = useState<{ id: number; name: string }[]>([]);
   const [cats, setCats] = useState<{ id: number; parent_id: number | null; name: string; sort: number }[]>([]);
   const [cols, setCols] = useState<{ id: number; name: string }[]>([]);
+  const [defaultOrg, setDefaultOrg] = useState('');
+  const [defaultCollection, setDefaultCollection] = useState('');
   const [managedByCustom, setManagedByCustom] = useState(false);
   const [collectionCustom, setCollectionCustom] = useState(false);
 
@@ -185,6 +187,11 @@ export function CreateDatasetForm({
     metaClient.listOrganizations().then(setOrgs).catch(() => {});
     metaClient.listCategories().then(setCats).catch(() => {});
     metaClient.listCollections().then(setCols).catch(() => {});
+    metaClient.listSettings().then((settings) => {
+      const defaults = (settings.find((s) => s.key === 'portal.defaults')?.value ?? {}) as Record<string, unknown>;
+      setDefaultOrg(String(defaults.managed_by ?? ''));
+      setDefaultCollection(String(defaults.collection ?? ''));
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -261,6 +268,13 @@ export function CreateDatasetForm({
     setValidation(null);
   };
 
+  // Settings-driven defaults (portal Settings page): pre-fill Managed by and
+  // Collection from portal.defaults when the user typed nothing.
+  const applyDefaults = () => {
+    if (defaultOrg && !managedBy.trim() && orgs.some((o) => o.name === defaultOrg)) setManagedBy(defaultOrg);
+    if (defaultCollection && !collection.trim() && cols.some((c) => c.name === defaultCollection)) setCollection(defaultCollection);
+  };
+
   // Auto-suggest once on first open when nothing was typed yet.
   const autoSuggested = useRef(false);
   useEffect(() => {
@@ -270,6 +284,7 @@ export function CreateDatasetForm({
     if (anyFilled) return;
     autoSuggested.current = true;
     applySuggestions();
+    applyDefaults();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 

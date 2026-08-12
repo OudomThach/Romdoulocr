@@ -30,6 +30,23 @@ import { useToastStore } from '@/hooks/useToastStore';
 // --------------------------------------------------------------------------- #
 type DiffLine = { kind: 'same' | 'del' | 'add'; text: string };
 
+/** Pipe-table text -> grid rows (for the Table editing view). */
+function parsePipeRows(text: string): string[][] {
+  const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.includes('|'));
+  const rows = lines
+    .map((l) => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()))
+    .filter((r) => r.some((c) => c));
+  return rows;
+}
+
+/** Grid rows -> pipe-table markdown text (back into the review textarea). */
+function rowsToMarkdown(rows: string[][]): string {
+  if (rows.length === 0) return '';
+  const width = Math.max(...rows.map((r) => r.length));
+  const pad = (r: string[]) => [...r, ...Array<string>(Math.max(0, width - r.length)).fill('')];
+  return rows.map((r) => `| ${pad(r).join(' | ')} |`).join('\n');
+}
+
 function diffLines(a: string, b: string): DiffLine[] {
   const al = a.split('\n');
   const bl = b.split('\n');
@@ -78,6 +95,8 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
   const [reviewText, setReviewText] = useState('');
   const [originalText, setOriginalText] = useState('');
   const [verifyChecked, setVerifyChecked] = useState(false);
+  const [reviewView, setReviewView] = useState<'text' | 'table'>('text');
+  const [tableRows, setTableRows] = useState<string[][]>([]);
   const [createdAt, setCreatedAt] = useState('');
   const [updatedAt, setUpdatedAt] = useState('');
   const [loading, setLoading] = useState(false);
@@ -92,6 +111,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
     setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
     setReviewText(fullText);
     setOriginalText(fullText);
+    setTableRows(parsePipeRows(fullText));
     setCreatedAt(rec.created_at ?? '');
     setUpdatedAt(rec.audit?.edited_at ?? '');
     setDraftSavedAt(rec.audit?.edited_at ?? rec.created_at ?? '');
@@ -229,7 +249,25 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
               {/* â‘  Review / correct the OCR text */}
               <div className="rounded-xl border border-slate-200 bg-white/70 p-4">
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-slate-900">Review OCR text</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-slate-900">Review OCR text</div>
+                    <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => setReviewView('text')}
+                        className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${reviewView === 'text' ? 'bg-slate-100 text-slate-950' : 'text-slate-500'}`}
+                      >
+                        Text
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setTableRows(parsePipeRows(reviewText)); setReviewView('table'); }}
+                        className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${reviewView === 'table' ? 'bg-slate-100 text-slate-950' : 'text-slate-500'}`}
+                      >
+                        Table
+                      </button>
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2">
                     {reviewText !== originalText && (
                       <button
@@ -251,7 +289,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                   </div>
                 </div>
                 <p className="mb-2 text-xs text-slate-500">Correct any misreads before saving â€” numbers, dates, names and totals.</p>
-                {showDiff && reviewText !== originalText ? (
+                {showDiff && reviewView === 'text' && reviewText !== originalText ? (
                   <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed">
                     {diffLines(originalText, reviewText).map((line, idx) => {
                       if (line.kind === 'same') {
@@ -263,6 +301,63 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                       return <div key={idx} className="bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10">{line.text || ' '}</div>;
                     })}
                   </div>
+                ) : reviewView === 'table' ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full border-collapse text-sm">
+                      <tbody>
+                        {tableRows.map((row, r) => {
+                          const width = Math.max(1, ...tableRows.map((x) => x.length));
+                          const pad = [...row, ...Array<string>(Math.max(0, width - row.length)).fill('')];
+                          return (
+                            <tr key={r} className="border-b border-slate-100 last:border-b-0 odd:bg-white even:bg-slate-50/60">
+                              {pad.map((cell, c) => (
+                                <td key={c} className="border-r border-slate-100 px-1 py-0.5 last:border-r-0">
+                                  <input
+                                    className="w-full min-w-20 rounded border border-transparent bg-transparent px-1.5 py-1 text-xs text-slate-700 hover:border-slate-200 focus:border-accent focus:bg-white focus:outline-none"
+                                    value={cell}
+                                    onChange={(e) => {
+                                      const next = tableRows.map((x, ri) => {
+                                        const p = [...x, ...Array<string>(Math.max(0, width - x.length)).fill('')];
+                                        return ri === r ? p.map((v, ci) => (ci === c ? e.target.value : v)) : x;
+                                      });
+                                      setTableRows(next);
+                                      setReviewText(rowsToMarkdown(next));
+                                    }}
+                                  />
+                                </td>
+                              ))}
+                              <td className="w-8 px-1">
+                                <button type="button" className="rounded px-1 text-xs text-red-400 hover:bg-red-50 hover:text-red-600"
+                                  onClick={() => { const next = tableRows.filter((_, ri) => ri !== r); setTableRows(next); setReviewText(rowsToMarkdown(next)); }}>
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <div className="flex items-center gap-2 border-t border-slate-200 bg-slate-50 px-2 py-1.5">
+                      <button type="button" className="btn-secondary px-2.5 py-1 text-[11px]"
+                        onClick={() => {
+                          const width = Math.max(1, ...tableRows.map((x) => x.length));
+                          const next = [...tableRows, Array<string>(width).fill('')];
+                          setTableRows(next);
+                          setReviewText(rowsToMarkdown(next));
+                        }}>
+                        + row
+                      </button>
+                      <button type="button" className="btn-secondary px-2.5 py-1 text-[11px]"
+                        onClick={() => {
+                          const next = tableRows.map((x) => [...x, '']);
+                          setTableRows(next);
+                          setReviewText(rowsToMarkdown(next));
+                        }}>
+                        + column
+                      </button>
+                      <span className="ml-auto text-[11px] text-slate-400">edits flow back into the text — save once</span>
+                    </div>
+                  </div>
                 ) : (
                   <textarea
                     className="input min-h-32 w-full resize-y text-sm leading-relaxed"
@@ -270,7 +365,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                     value={reviewText}
                     onChange={(e) => setReviewText(e.target.value)}
                     spellCheck={false}
-                    placeholder="OCR textâ€¦"
+                    placeholder="OCR text…"
                   />
                 )}
                 <div className="mt-1 flex justify-end text-[11px] text-slate-400">
