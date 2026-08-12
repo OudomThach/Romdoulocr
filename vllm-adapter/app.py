@@ -1,4 +1,4 @@
-"""
+﻿"""
 vLLM backend adapter.
 
 The Khmer Document Parser SPA speaks one API contract (the Modal "khparser"
@@ -6,7 +6,7 @@ API): one-shot multipart uploads to /parse-pdf, /ocr-image, /parse-table that
 return DocumentResult / OcrImageResponse / TableResult.
 
 The local vLLM OCR service (surya screenshot_app, a Flask app backed by the
-surya-vllm server) speaks a DIFFERENT contract: a stateful two-step flow —
+surya-vllm server) speaks a DIFFERENT contract: a stateful two-step flow â€”
 POST /upload (saves the file server-side, returns a file_path), then
 POST /process {file_path, page, mode} per page.
 
@@ -14,7 +14,7 @@ This adapter bridges the two: it accepts the SPA's contract and drives the
 Flask app under the hood, reshaping responses back into the SPA's types so the
 existing tabs / bounding-box viewer keep working unchanged.
 
-Nothing here touches the default (Modal) path — the SPA only routes to this
+Nothing here touches the default (Modal) path â€” the SPA only routes to this
 service when the user flips the backend toggle to "vLLM" (-> /api-vllm).
 """
 
@@ -27,7 +27,7 @@ from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, File, Query, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -37,14 +37,20 @@ from preprocess import preprocess_for_surya
 # container is reachable by name; override via env for other topologies.
 FLASK_URL = os.environ.get("SURYA_FLASK_URL", "http://surya-container-vllm:8501").rstrip("/")
 
+# Option-B save: when a request carries `save=true`, the extraction is stored in
+# the metadata service (Data management) with artifacts generated server-side.
+# Requires the caller to present the metadata API key.
+METADATA_API_KEY = os.environ.get("METADATA_API_KEY", "").strip()
+METADATA_SAVE_URL = os.environ.get("METADATA_SAVE_URL", "http://metadata-service:8095/api/v1/capture-ocr").rstrip("/")
+
 # Model inference can be slow; give the upstream plenty of headroom.
 TIMEOUT = httpx.Timeout(connect=15.0, read=600.0, write=600.0, pool=600.0)
 
-app = FastAPI(title="khparser → vLLM adapter", version="1.0.0")
+app = FastAPI(title="khparser â†’ vLLM adapter", version="1.0.0")
 
 # Shared-secret gate. When ADAPTER_TOKEN is set (public deployment behind a
 # Tailscale Funnel), every request must carry a matching `X-Adapter-Token`
-# header or gets 401 — so a naked GPU endpoint on the internet can't be abused
+# header or gets 401 â€” so a naked GPU endpoint on the internet can't be abused
 # even if someone finds the funnel URL. Left UNSET for the home/nginx
 # deployment (same private network), where no gate is needed.
 ADAPTER_TOKEN = os.environ.get("ADAPTER_TOKEN", "").strip()
@@ -241,7 +247,7 @@ def _regions_from_page(html: str, blocks: list[dict[str, Any]]) -> list[dict[str
     Build SPA LayoutRegion[] from a Flask page.
 
     The page `html` is a sequence of
-        <div data-bbox="x0 y0 x1 y1" data-label="LABEL">…content…</div>
+        <div data-bbox="x0 y0 x1 y1" data-label="LABEL">â€¦contentâ€¦</div>
     blocks (see _assemble_page_html in screenshot_app.py). That gives us
     per-region bbox + label + text. We pull per-region confidence from the
     parallel `blocks` canvas array, matched by bbox.
@@ -384,7 +390,7 @@ async def _upload_preprocessed(
     try:
         prepped = preprocess_for_surya(raw, do_deskew=do_deskew)
         return await _upload(client, file, data=prepped, content_type="image/png")
-    except Exception:  # noqa: BLE001 — never let preprocessing break OCR
+    except Exception:  # noqa: BLE001 â€” never let preprocessing break OCR
         return await _upload(client, file, data=raw)
 
 
@@ -402,8 +408,42 @@ async def _process(
     return r.json()
 
 
+async def _maybe_save(
+    *,
+    save: bool,
+    x_api_key: str | None,
+    filename: str,
+    full_text: str,
+    result: Any,
+    num_pages: int = 1,
+) -> None:
+    """Option B: save the extraction into Data management (capture-ocr) with
+    server-side artifacts. Requires the metadata API key from the caller."""
+    if not save:
+        return
+    if not METADATA_API_KEY or not x_api_key or not hmac.compare_digest(x_api_key, METADATA_API_KEY):
+        raise HTTPException(status_code=401, detail="save=true requires a valid X-API-Key")
+    body = {
+        "document_name": filename,
+        "full_text": full_text or "",
+        "result": result if isinstance(result, dict) else {},
+        "num_pages": int(num_pages or 1),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            r = await client.post(
+                METADATA_SAVE_URL,
+                json=body,
+                headers={"X-API-Key": METADATA_API_KEY, "X-Adapter-Token": ADAPTER_TOKEN or ""},
+            )
+            r.raise_for_status()
+    except Exception:  # noqa: BLE001 â€” saving is best-effort; never fail OCR
+        logger = __import__("logging").getLogger("vllm-adapter")
+        logger.exception("save=true capture failed")
+
+
 # --------------------------------------------------------------------------- #
-# Routes — the SPA (khparser) contract
+# Routes â€” the SPA (khparser) contract
 # --------------------------------------------------------------------------- #
 @app.get("/health")
 async def health() -> JSONResponse:
@@ -426,13 +466,19 @@ async def health() -> JSONResponse:
 
 
 @app.post("/ocr-image")
-async def ocr_image(file: UploadFile = File(...), dpi: int | None = Query(None)) -> JSONResponse:
+async def ocr_image(
+    request: Request,
+    file: UploadFile = File(...),
+    dpi: int | None = Query(None),
+    save: bool = Query(False),
+) -> JSONResponse:
+    x_api_key: str | None = request.headers.get("x-api-key")
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         # Surya-specific preprocessing (upscale low-res / deskew / enhance) so the
         # model meets its bare-minimum input quality on old/blurry/small scans.
         up = await _upload_preprocessed(client, file)
         # Layout-guided OCR FIRST. `block_ocr` detects layout regions and OCRs
-        # each one — faster and far more robust on real document pages than
+        # each one â€” faster and far more robust on real document pages than
         # whole-image recognition (`full_page`), which feeds the entire page to
         # the model as ONE sequence and on a dense scan can run for minutes and
         # still return nothing (the 88s / 0-chars case). Fall back to full_page
@@ -441,6 +487,8 @@ async def ocr_image(file: UploadFile = File(...), dpi: int | None = Query(None))
         res = await _process(client, up["file_path"], 0, "block_ocr", dpi)
         if not (res.get("text") or "").strip():
             res = await _process(client, up["file_path"], 0, "full_page", dpi)
+    await _maybe_save(save=save, x_api_key=x_api_key, filename=file.filename or "upload",
+                      full_text=res.get("text") or "", result=res)
     return JSONResponse(
         {
             "text": res.get("text") or "",
@@ -454,7 +502,7 @@ async def ocr_image(file: UploadFile = File(...), dpi: int | None = Query(None))
 async def _document_from_file(
     client: httpx.AsyncClient, file: UploadFile, dpi: int | None = None
 ) -> dict[str, Any]:
-    # Preprocess image inputs (upscale/grayscale/sharpen) but NOT deskew — see
+    # Preprocess image inputs (upscale/grayscale/sharpen) but NOT deskew â€” see
     # _upload_preprocessed; document boxes must stay aligned to the source page.
     # PDFs pass through raw (rasterized server-side at the requested DPI).
     up = await _upload_preprocessed(client, file, do_deskew=False)
@@ -487,23 +535,34 @@ async def _document_from_file(
 
 
 @app.post("/parse-pdf")
-async def parse_pdf(files: list[UploadFile] = File(...), dpi: int | None = Query(None)) -> JSONResponse:
+async def parse_pdf(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    dpi: int | None = Query(None),
+    save: bool = Query(False),
+) -> JSONResponse:
+    x_api_key: str | None = request.headers.get("x-api-key")
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         docs = [await _document_from_file(client, f, dpi) for f in files]
     if len(docs) == 1:
-        return JSONResponse(docs[0])
-    # Multiple files: merge into a single document, renumbering pages.
-    merged = docs[0]
-    offset = len(merged["pages"])
-    for doc in docs[1:]:
-        for p in doc["pages"]:
-            p["page_number"] += offset
-            merged["pages"].append(p)
-        offset += len(doc["pages"])
-        if doc.get("full_text"):
-            merged["full_text"] = (merged.get("full_text") or "") + "\n\n" + doc["full_text"]
-    merged["num_pages"] = len(merged["pages"])
-    return JSONResponse(merged)
+        result = docs[0]
+    else:
+        # Multiple files: merge into a single document, renumbering pages.
+        merged = docs[0]
+        offset = len(merged["pages"])
+        for doc in docs[1:]:
+            for p in doc["pages"]:
+                p["page_number"] += offset
+                merged["pages"].append(p)
+            offset += len(doc["pages"])
+            if doc.get("full_text"):
+                merged["full_text"] = (merged.get("full_text") or "") + "\n\n" + doc["full_text"]
+        merged["num_pages"] = len(merged["pages"])
+        result = merged
+    await _maybe_save(save=save, x_api_key=x_api_key, filename=str(result.get("filename") or "document"),
+                      full_text=str(result.get("full_text") or ""), result=result,
+                      num_pages=int(result.get("num_pages") or 1))
+    return JSONResponse(result)
 
 
 @app.post("/parse-pdf-translated")
@@ -550,23 +609,31 @@ def _cells_from_table(result: dict[str, Any]) -> tuple[list[dict[str, Any]], int
 
 
 @app.post("/parse-table")
-async def parse_table(file: UploadFile = File(...), dpi: int | None = Query(None)) -> JSONResponse:
+async def parse_table(
+    request: Request,
+    file: UploadFile = File(...),
+    dpi: int | None = Query(None),
+    save: bool = Query(False),
+) -> JSONResponse:
+    x_api_key: str | None = request.headers.get("x-api-key")
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         # do_deskew=False: table cell bboxes are drawn over the ORIGINAL page by
-        # the SPA (Compare docx cell boxes) — deskew rotates+expands the image,
+        # the SPA (Compare docx cell boxes) â€” deskew rotates+expands the image,
         # which would shift every cell box off the source page. Upscale/gray/
         # sharpen are aspect-preserving and stay on.
         up = await _upload_preprocessed(client, file, do_deskew=False)
-        # Full-page OCR — surya-ocr-2 returns a real table as an HTML <table> WITH
+        # Full-page OCR â€” surya-ocr-2 returns a real table as an HTML <table> WITH
         # text (the structure-only table_rec model returns EMPTY cell text, so we
         # don't use it here).
         res = await _process(client, up["file_path"], 0, "full_page", dpi)
+        await _maybe_save(save=save, x_api_key=x_api_key, filename=file.filename or "table",
+                          full_text=str(res.get("text") or ""), result=res)
 
         parsed = _parse_html_table(res.get("html") or "")
         if parsed is None:
             # No table on the page. Match the cloud (khparser) API, which ALWAYS
             # returns the text: fall back to the full-page text as a single-column
-            # grid (one row per line) instead of an empty 0×0 "no table" result,
+            # grid (one row per line) instead of an empty 0Ã—0 "no table" result,
             # so Table mode still yields content on prose pages.
             full_text = res.get("text") or ""
             lines = [ln.rstrip() for ln in full_text.split("\n")]

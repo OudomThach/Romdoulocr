@@ -1,9 +1,9 @@
-"""
+﻿"""
 Google Lens adapter for the Romdoul OCR SPA.
 
 Wraps the (unofficial, free) Google Lens OCR endpoint via `chrome-lens-py` and
 exposes the SAME khparser API contract the SPA already speaks (/ocr-image,
-/parse-pdf, /parse-pdf-translated, /parse-table, /health) — so the frontend
+/parse-pdf, /parse-pdf-translated, /parse-table, /health) â€” so the frontend
 just points a new backend at it, exactly like the vLLM adapter.
 
 Lens gives us plain OCR text (with line breaks), per-word NORMALIZED geometry
@@ -24,14 +24,14 @@ import os
 import tempfile
 from typing import Any
 
-from fastapi import FastAPI, File, Query, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image
 
 from chrome_lens_py import LensAPI
 
-app = FastAPI(title="Google Lens → khparser adapter", version="1.0.0")
+app = FastAPI(title="Google Lens â†’ khparser adapter", version="1.0.0")
 
 ADAPTER_TOKEN = os.environ.get("ADAPTER_TOKEN", "").strip()
 # Default OCR language hint; Lens auto-detects, so 'km' (Khmer) is a safe bias.
@@ -53,7 +53,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 
 # --------------------------------------------------------------------------- #
-# Lens → SPA shape helpers
+# Lens â†’ SPA shape helpers
 # --------------------------------------------------------------------------- #
 def _rect_to_points(x0: float, y0: float, x1: float, y1: float) -> list[list[float]]:
     return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
@@ -234,6 +234,37 @@ def _grid_from_words(word_data: list[dict], w: int, h: int) -> tuple[int, int, l
     return len(rows), ncols, cells, structured
 
 
+# Option-B save: `save=true` stores the extraction in Data management
+# (capture-ocr) with server-side artifacts. Requires the metadata API key.
+METADATA_API_KEY = os.environ.get("METADATA_API_KEY", "").strip()
+METADATA_SAVE_URL = os.environ.get("METADATA_SAVE_URL", "http://metadata-service:8095/api/v1/capture-ocr").rstrip("/")
+
+
+async def _maybe_save(*, save: bool, x_api_key: str | None, filename: str, full_text: str, result: Any, num_pages: int = 1) -> None:
+    if not save:
+        return
+    if not METADATA_API_KEY or not x_api_key or not hmac.compare_digest(x_api_key, METADATA_API_KEY):
+        raise HTTPException(status_code=401, detail="save=true requires a valid X-API-Key")
+    body = {
+        "document_name": filename,
+        "full_text": full_text or "",
+        "result": result if isinstance(result, dict) else {},
+        "num_pages": int(num_pages or 1),
+    }
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            r = await client.post(
+                METADATA_SAVE_URL,
+                json=body,
+                headers={"X-API-Key": METADATA_API_KEY, "X-Adapter-Token": ADAPTER_TOKEN or ""},
+            )
+            r.raise_for_status()
+    except Exception:  # noqa: BLE001 â€” saving is best-effort; never fail OCR
+        import logging
+        logging.getLogger("lens-adapter").exception("save=true capture failed")
+
+
 async def _lens_ocr(data: bytes, lang: str) -> dict[str, Any]:
     """Run Google Lens on raw image bytes; return the lens result dict + dims."""
     with Image.open(io.BytesIO(data)) as im:
@@ -271,11 +302,19 @@ async def health() -> JSONResponse:
 
 
 @app.post("/ocr-image")
-async def ocr_image(file: UploadFile = File(...), dpi: int | None = Query(None)) -> JSONResponse:
+async def ocr_image(
+    request: Request,
+    file: UploadFile = File(...),
+    dpi: int | None = Query(None),
+    save: bool = Query(False),
+) -> JSONResponse:
+    x_api_key: str | None = request.headers.get("x-api-key")
     try:
         res = await _lens_ocr(await file.read(), DEFAULT_LANG)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"detail": f"Google Lens error: {exc}"}, status_code=502)
+    await _maybe_save(save=save, x_api_key=x_api_key, filename=file.filename or "upload",
+                      full_text=str(res.get("ocr_text") or ""), result=res)
     return JSONResponse(
         {"text": res.get("ocr_text") or "", "confidence": 0.0, "filename": file.filename, "decoder": "google-lens"}
     )
@@ -307,8 +346,22 @@ async def _document(files: list[UploadFile], translate: bool) -> JSONResponse:
 
 
 @app.post("/parse-pdf")
-async def parse_pdf(files: list[UploadFile] = File(...), dpi: int | None = Query(None)) -> JSONResponse:
-    return await _document(files, translate=False)
+async def parse_pdf(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    dpi: int | None = Query(None),
+    save: bool = Query(False),
+) -> JSONResponse:
+    x_api_key: str | None = request.headers.get("x-api-key")
+    response = await _document(files, translate=False)
+    if save and response.status_code == 200:
+        body = response.body
+        import json as _json
+        doc = _json.loads(body)
+        await _maybe_save(save=True, x_api_key=x_api_key, filename=str(doc.get("filename") or "document"),
+                          full_text=str(doc.get("full_text") or ""), result=doc,
+                          num_pages=int(doc.get("num_pages") or 1))
+    return response
 
 
 @app.post("/parse-pdf-translated")
@@ -322,11 +375,17 @@ async def parse_pdf_translated(
 
 
 @app.post("/parse-table")
-async def parse_table(file: UploadFile = File(...), dpi: int | None = Query(None)) -> JSONResponse:
+async def parse_table(
+    request: Request,
+    file: UploadFile = File(...),
+    dpi: int | None = Query(None),
+    save: bool = Query(False),
+) -> JSONResponse:
     """Reconstruct a multi-column grid from Lens word geometry (rows by vertical
-    proximity, columns by horizontal whitespace gaps). Best-effort — Lens has no
+    proximity, columns by horizontal whitespace gaps). Best-effort â€” Lens has no
     native table model. Falls back to a single-column line list when no columns
     are detected (e.g. prose)."""
+    x_api_key: str | None = request.headers.get("x-api-key")
     try:
         res = await _lens_ocr(await file.read(), DEFAULT_LANG)
     except Exception as exc:  # noqa: BLE001
@@ -335,7 +394,7 @@ async def parse_table(file: UploadFile = File(...), dpi: int | None = Query(None
     w, h = res.get("_w", 0), res.get("_h", 0)
     num_rows, num_cols, cells, structured = _grid_from_words(res.get("word_data") or [], w, h)
 
-    # Fallback: no real columns → one line per row (previous behavior).
+    # Fallback: no real columns â†’ one line per row (previous behavior).
     if num_cols <= 1:
         lines = [ln for ln in (res.get("ocr_text") or "").split("\n") if ln.strip()]
         cells = [
@@ -343,6 +402,9 @@ async def parse_table(file: UploadFile = File(...), dpi: int | None = Query(None
             for i, ln in enumerate(lines)
         ]
         num_rows, num_cols, structured = len(lines), (1 if lines else 0), "\n".join(lines)
+
+    await _maybe_save(save=save, x_api_key=x_api_key, filename=file.filename or "table",
+                      full_text=structured or "", result={"structured_text": structured, "num_rows": num_rows})
 
     return JSONResponse(
         {

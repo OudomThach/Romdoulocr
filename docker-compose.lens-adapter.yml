@@ -22,6 +22,9 @@ services:
     environment:
       ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
       LENS_OCR_LANG: ${LENS_OCR_LANG:-km}
+      # Option-B save: key + capture endpoint for `save=true` requests.
+      METADATA_API_KEY: ${METADATA_API_KEY:-}
+      METADATA_SAVE_URL: ${METADATA_SAVE_URL:-http://metadata-service:8095/api/v1/capture-ocr}
     ports:
       - "${LENS_ADAPTER_PORT:-8091}:8091"
     networks:

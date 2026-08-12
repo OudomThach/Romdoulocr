@@ -356,6 +356,8 @@ class RomdoulClient:
         *,
         adapter_token: str | None = None,
         user_agent: str | None = None,
+        save: bool = False,
+        api_key: str | None = None,
     ) -> None:
         if engine not in ENGINE_PREFIXES:
             raise ValueError(f"engine must be one of {sorted(ENGINE_PREFIXES)}, got {engine!r}")
@@ -364,6 +366,10 @@ class RomdoulClient:
         self.prefix = ENGINE_PREFIXES[engine]
         self.timeout = float(timeout)
         self.max_retries = int(max_retries)
+        # Option B: when save=True, every extraction is stored in the metadata
+        # service (Data management) with server-side artifacts via capture-ocr.
+        self.save = bool(save)
+        self.api_key = api_key
         # Only needed when talking to an adapter DIRECTLY (localhost:8091 &c.).
         # Through nginx the header is injected server-side and this stays None.
         self.adapter_token = adapter_token
@@ -492,7 +498,33 @@ class RomdoulClient:
             self._user_session,
             adapter_token=self.adapter_token,
             user_agent=self.user_agent,
+            save=self.save,
+            api_key=self.api_key,
         )
+
+    def _capture(self, filename: str, full_text: str, result: Any, num_pages: int = 1) -> None:
+        """Option B: save the extraction into Data management (capture-ocr) so
+        direct API callers land in the portal queue automatically. Requires an
+        API key; failures are logged, never raised (OCR already succeeded)."""
+        if not self.save:
+            return
+        if not self.api_key:
+            warnings.warn("save=True but no api_key set — extraction NOT saved", RuntimeWarning, stacklevel=3)
+            return
+        try:
+            self._session().post(
+                f"{self.base_url}/api-meta/api/v1/capture-ocr",
+                json={
+                    "document_name": filename,
+                    "full_text": full_text or "",
+                    "result": result if isinstance(result, dict) else {},
+                    "num_pages": int(num_pages or 1),
+                },
+                headers={"X-API-Key": self.api_key, "User-Agent": self.user_agent},
+                timeout=min(60.0, self.timeout),
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort save
+            warnings.warn(f"save capture failed: {exc}", RuntimeWarning, stacklevel=3)
 
     def _backoff(self, attempt: int) -> float:
         """Equal-jitter exponential backoff: half the window fixed, half random.
@@ -641,7 +673,9 @@ class RomdoulClient:
         if dpi is not None:
             params["dpi"] = int(dpi)
         raw = self._request("POST", "/ocr-image", params=params, parts=[("file", part)], idempotency_key=idempotency_key)
-        return _normalise_ocr(raw, part[0])
+        out = _normalise_ocr(raw, part[0])
+        self._capture(part[0], out.get("text") or "", {"engine": self.engine, "result": raw})
+        return out
 
     def parse_table(
         self,
@@ -666,7 +700,9 @@ class RomdoulClient:
         if dpi is not None:
             params["dpi"] = int(dpi)
         result = self._request("POST", "/parse-table", params=params, parts=[("file", part)], idempotency_key=idempotency_key)
-        return _expect_dict(result, "/parse-table")
+        out = _expect_dict(result, "/parse-table")
+        self._capture(part[0], out.get("structured_text") or out.get("text") or "", {"engine": self.engine, "result": out})
+        return out
 
     def parse_document(
         self,
@@ -739,7 +775,10 @@ class RomdoulClient:
             if source_lang:
                 params["source_lang"] = source_lang
         result = self._request("POST", path, params=params, parts=parts, idempotency_key=idempotency_key)
-        return _expect_dict(result, path)
+        out = _expect_dict(result, path)
+        self._capture(out.get("filename") or "document", self.text_of(out), {"engine": self.engine, "result": out},
+                      num_pages=int(out.get("num_pages") or 1))
+        return out
 
     def parse_document_pages(
         self,

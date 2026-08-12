@@ -26,6 +26,9 @@ services:
       # Shared secret required on every request when set (public Funnel
       # exposure). Read from a gitignored root .env; UNSET = no gate (home).
       ADAPTER_TOKEN: ${ADAPTER_TOKEN:-}
+      # Option-B save: key + capture endpoint for `save=true` requests.
+      METADATA_API_KEY: ${METADATA_API_KEY:-}
+      METADATA_SAVE_URL: ${METADATA_SAVE_URL:-http://metadata-service:8095/api/v1/capture-ocr}
     ports:
       - "${VLLM_ADAPTER_PORT:-8090}:8090"
     networks:
