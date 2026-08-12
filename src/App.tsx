@@ -111,6 +111,20 @@ export default function App() {
               <LanguageToggle />
               <BackendToggle />
               <RenderQualityToggle />
+              <a
+                href="/portal/"
+                target="_blank"
+                rel="noreferrer"
+                title="Romdoul Data Sharing portal — Data management, Datasets, Explore"
+                className="hidden h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm transition-all duration-150 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 active:scale-95 sm:flex"
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <ellipse cx="12" cy="5" rx="9" ry="3" />
+                  <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+                  <path d="M3 12a9 3 0 0 0 18 0" />
+                </svg>
+                Portal
+              </a>
               {/* Desktop gear — phones use the floating gear FAB bottom-right instead. */}
               <button
                 type="button"

@@ -6,6 +6,7 @@ import type {
 } from '@/types/api';
 import { getBaseUrl, baseUrlFor, getBackend, getRenderDpi, type BackendId } from '@/lib/backend';
 import { useMetadataStore, type MetaSummary } from '@/lib/metadataStore';
+import { buildCsv, buildMarkdown, stripBulkyBase64 } from '@/lib/datasetArtifacts';
 
 // The API base is resolved at call time (not module load) so the in-app
 // backend toggle can switch between the default upstream ("/api", proxied to
@@ -118,6 +119,11 @@ function reportExtraction(
         region_count: Array.isArray(p.regions) ? p.regions.length : 0,
       })),
       ...(fullText !== undefined ? { full_text: fullText } : {}),
+      // Auto-save v2: artifacts are generated and stored with EVERY extraction,
+      // so nothing is ever lost — the review gate only confirms later.
+      ...(fullText !== undefined ? { markdown: buildMarkdown(fullText) } : {}),
+      ...(fullText !== undefined ? { csv: buildCsv(fullText) } : {}),
+      json: stripBulkyBase64(data),
       ...(typeof data.num_rows === 'number' ? { num_rows: data.num_rows } : {}),
       ...(typeof data.num_cols === 'number' ? { num_cols: data.num_cols } : {}),
     },

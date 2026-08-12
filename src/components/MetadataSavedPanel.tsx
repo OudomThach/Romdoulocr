@@ -1,39 +1,27 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useMetadataStore } from '@/lib/metadataStore';
 import { useMetaAuth } from '@/lib/useMetaAuth';
 import { metaClient } from '@/lib/metaClient';
 import { LoginModal } from '@/components/LoginModal';
 import { CreateDatasetForm, type DatasetPayload } from '@/components/CreateDatasetForm';
-import { parsePipeTable } from '@/lib/tableExport';
+import { buildCsv, buildMarkdown } from '@/lib/datasetArtifacts';
 import { useSettingsStore } from '@/hooks/useSettingsStore';
 import { useToastStore } from '@/hooks/useToastStore';
 
 /**
  * Inline panel after a parse: the forced Review & Save gate.
  *
- * The extraction is auto-saved as a `raw` draft the moment OCR finishes; this
- * panel makes the user VERIFY before the record counts:
- *   ① review/correct the OCR text,
- *   ② confirm the dataset metadata,
- *   ③ tick "I verified the text and metadata" — Save stays blocked until then.
+ * The extraction is auto-saved as a `raw` draft the moment OCR finishes (with
+ * markdown/csv/json artifacts â€” see lib/api.ts reportExtraction); this panel
+ * makes the user VERIFY before the record counts:
+ *   â‘  review/correct the OCR text,
+ *   â‘¡ confirm the dataset metadata,
+ *   â‘¢ tick "I verified the text and metadata" â€” Save stays blocked until then.
  *
- * On save the record is PATCHed with the CORRECTED text plus auto-generated
+ * On save the record is PATCHed with the CORRECTED text plus regenerated
  * `markdown` and `csv` of the final text (original if nothing was edited), and
- * the audit trail flips status raw → edited.
+ * the audit trail flips status raw â†’ edited.
  */
-
-function buildCsv(text: string): string {
-  const esc = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
-  const rows: string[][] = [];
-  const parsed = parsePipeTable(text);
-  if (parsed && parsed.rows.length > 0) {
-    rows.push(parsed.headers, ...parsed.rows);
-  } else {
-    rows.push(...text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => [l]));
-  }
-  // BOM so Excel renders Khmer correctly; CRLF per RFC 4180.
-  return '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
-}
 
 // --------------------------------------------------------------------------- #
 // Line-level diff (LCS) for the review step: shows what the user changed
@@ -154,7 +142,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       const nextData: Record<string, unknown> = {
         ...prevData,
         full_text: finalText,
-        markdown: finalText,
+        markdown: buildMarkdown(finalText),
         csv: buildCsv(finalText),
         dataset: { ...(dataset ?? {}), ...payload },
       };
@@ -163,12 +151,12 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
       setDataset((rec.data?.dataset as Record<string, unknown>) ?? {});
       setUpdatedAt((rec.audit?.edited_at as string) ?? '');
       patchSummary(last.id, { status: 'edited' });
-      toast('Saved — CSV + Markdown generated, status: edited', 'success', {
+      toast('Saved â€” CSV + Markdown generated, status: edited', 'success', {
         label: 'Undo',
         run: () => {
           void metaClient.patchRecord(last.id, { data: prevData }).then(() => {
             patchSummary(last.id, { status: 'raw' });
-            toast('Reverted — draft restored', 'info');
+            toast('Reverted â€” draft restored', 'info');
           }).catch(() => toast('Undo failed', 'error'));
         },
       });
@@ -210,9 +198,9 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
               type="button"
               className="btn-secondary px-3 py-1.5 text-xs"
               onClick={() => void startEdit()}
-              title={draftSavedAt ? `Draft saved ${draftSavedAt.replace('T', ' ').slice(0, 16)} — resume the review` : 'Resume the verification review'}
+              title={draftSavedAt ? `Draft saved ${draftSavedAt.replace('T', ' ').slice(0, 16)} â€” resume the review` : 'Resume the verification review'}
             >
-              ⏎ Resume review
+              âŽ Resume review
             </button>
           )}
           {canEdit ? (
@@ -234,11 +222,11 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
 
       {editing && (
         <div className="border-t border-slate-200 bg-white/60 px-4 py-3 space-y-3">
-          {loading && <p className="text-sm text-slate-500">Loading…</p>}
+          {loading && <p className="text-sm text-slate-500">Loadingâ€¦</p>}
           {error && <p className="text-sm text-red-500">{error}</p>}
           {data && !loading && (
             <>
-              {/* ① Review / correct the OCR text */}
+              {/* â‘  Review / correct the OCR text */}
               <div className="rounded-xl border border-slate-200 bg-white/70 p-4">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <div className="text-sm font-semibold text-slate-900">Review OCR text</div>
@@ -262,7 +250,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                     </button>
                   </div>
                 </div>
-                <p className="mb-2 text-xs text-slate-500">Correct any misreads before saving — numbers, dates, names and totals.</p>
+                <p className="mb-2 text-xs text-slate-500">Correct any misreads before saving â€” numbers, dates, names and totals.</p>
                 {showDiff && reviewText !== originalText ? (
                   <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed">
                     {diffLines(originalText, reviewText).map((line, idx) => {
@@ -282,15 +270,15 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                     value={reviewText}
                     onChange={(e) => setReviewText(e.target.value)}
                     spellCheck={false}
-                    placeholder="OCR text…"
+                    placeholder="OCR textâ€¦"
                   />
                 )}
                 <div className="mt-1 flex justify-end text-[11px] text-slate-400">
-                  {reviewText === originalText ? 'original (unchanged)' : `${reviewText.length} chars — edited`}
+                  {reviewText === originalText ? 'original (unchanged)' : `${reviewText.length} chars â€” edited`}
                 </div>
               </div>
 
-              {/* ② Dataset metadata */}
+              {/* â‘¡ Dataset metadata */}
               <CreateDatasetForm
                 initial={dataset}
                 text={reviewText}
@@ -300,7 +288,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                 onSave={save}
               />
 
-              {/* ③ Verification gate */}
+              {/* â‘¢ Verification gate */}
               <div className={`rounded-xl border p-4 ${verifyChecked ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-300 bg-amber-50/60'}`}>
                 <label className="flex cursor-pointer items-start gap-2">
                   <input
@@ -313,7 +301,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                     <span className="font-semibold text-slate-900">I verified the OCR text and metadata</span>
                     <span className="ml-1 text-red-500">*</span>
                     <span className="block text-xs text-slate-500">
-                      Recheck the text against the original before saving — OCR can misread stacked Khmer consonants,
+                      Recheck the text against the original before saving â€” OCR can misread stacked Khmer consonants,
                       faint scans and table cells. Pay closest attention to numbers, dates, names and totals.
                     </span>
                   </span>
@@ -328,7 +316,7 @@ export function MetadataSavedPanel({ filename }: { filename?: string | null }) {
                   onClick={() => void save({})}
                   title={verifyChecked ? 'Save corrected text + metadata (auto-generates CSV & Markdown)' : 'Tick the verification box first'}
                 >
-                  {saving ? 'Saving…' : 'Verify & Save'}
+                  {saving ? 'Savingâ€¦' : 'Verify & Save'}
                 </button>
               </div>
             </>
