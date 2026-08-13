@@ -677,6 +677,14 @@ async def _upstream_error(_request: Request, exc: httpx.HTTPStatusError) -> JSON
         detail = body.get("error") or body.get("detail") or detail
     except Exception:  # noqa: BLE001
         detail = exc.response.text or detail
+    # The GPU engine is cold (model loading, ~2 min) when Flask answers 500
+    # with this Surya message. Surface it as 503 so the app's badge reads
+    # "waking up" instead of a hard failure.
+    if exc.response.status_code == 500 and ("not reachable" in str(detail) or "SURYA_INFERENCE_URL" in str(detail) or "unreachable" in str(detail)):
+        return JSONResponse(
+            {"detail": "Surya OCR 2 is waking up on the GPU (~2 min) — retry shortly.", "models_loaded": False},
+            status_code=503,
+        )
     return JSONResponse({"detail": detail}, status_code=exc.response.status_code)
 
 
