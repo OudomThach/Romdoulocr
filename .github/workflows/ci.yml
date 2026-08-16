@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  adapters:
+    name: Adapters (ruff + compile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - name: Ruff lint
+        run: ruff check --config 'line-length=120' --ignore B008,E501 vllm-adapter lens-adapter tidy-adapter status-adapter jobs-adapter
+      - name: Compile check
+        run: |
+          for a in vllm-adapter lens-adapter tidy-adapter status-adapter jobs-adapter; do
+            python -m py_compile "$a/app.py" "$a/preprocess.py" 2>/dev/null || python -m py_compile "$a/app.py"
+          done
+
+  spa:
+    name: SPA (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build

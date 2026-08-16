@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = ["node_modules", "dist", "src", "public"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "BLE"]
+ignore = ["B008", "SIM105", "BLE001", "E501"]
