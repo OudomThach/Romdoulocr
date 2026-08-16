@@ -2,9 +2,8 @@
 Transform-to-tidy adapter for the Romdoul OCR SPA.
 
 Reshapes an OCR-extracted Markdown table into "tidy data" (Hadley Wickham: each
-variable a column, each observation a row, each value a cell). Ported from the
-reference repo `fullstack_pdf2md_transform2tidy`, which uses a THREE-PROMPT
-pipeline rather than a single call:
+variable a column, each observation a row, each value a cell). Uses a
+THREE-PROMPT pipeline rather than a single call:
 
     profile(df)                     ← deterministic: describe the raw table as JSON
       → PROMPT 1  diagnose          ← LLM: find the structural problems
@@ -42,12 +41,13 @@ import os
 import re
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -616,7 +616,7 @@ def _transform(
 # Middleware / request model
 # --------------------------------------------------------------------------- #
 @app.middleware("http")
-async def _require_token(request: Request, call_next):
+async def _require_token(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
     if ADAPTER_TOKEN and not exempt:
         if not hmac.compare_digest(request.headers.get("x-adapter-token", ""), ADAPTER_TOKEN):

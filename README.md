@@ -44,16 +44,24 @@ Named after the **romdoul** (រំដួល), Cambodia's national flower.
 
 ## Architecture
 
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full system diagram,
+data flow, engine matrix and design decisions (ADRs).
+
 ```
 Browser (React SPA — Vite, Tailwind, zustand, TanStack Query)
    │  relative /api/... calls (no CORS headaches)
    ▼
 nginx (Docker, serves dist/ + reverse proxy)
    ├── /api/*       →  Khmer Parsing API (Modal cloud)        [Default]
-   └── /api-vllm/*  →  vllm-adapter (FastAPI sidecar)         [vLLM]
-                           │  translates khparser contract
-                           ▼
-                       surya-container-vllm (Flask + vLLM GPU stack)
+   ├── /api-vllm/*  →  vllm-adapter (FastAPI sidecar)         [vLLM]
+   │                       │  translates khparser contract
+   │                       ▼
+   │                   surya-container-vllm (Flask + vLLM GPU stack)
+   ├── /api-lens/*  →  lens-adapter (Google Lens, unofficial) [Lens]
+   ├── /api-tidy/*  →  tidy-adapter (Gemini/Anthropic 3-step) [Tidy]
+   ├── /api-jobs/*  →  jobs-adapter (async submit/poll batch) [Jobs]
+   ├── /v1/status   →  status-adapter (aggregate health fan-out)
+   └── /api-meta/*  →  metadata-service (+ /portal analyst UI)
 ```
 
 - The Modal upstream sends no `Access-Control-Allow-Origin`, so the SPA calls
@@ -138,6 +146,10 @@ with `t()` — unknown keys safely fall back to English.
 ├── docker-compose.vllm-adapter.yml
 ├── nginx.conf                    # SPA fallback, asset caching, /api proxies
 ├── vllm-adapter/                 # FastAPI sidecar: khparser contract → Surya
+├── lens-adapter/                 # Google Lens sidecar (unofficial, benchmarking)
+├── tidy-adapter/                 # Transform-to-tidy sidecar (Gemini/Anthropic)
+├── jobs-adapter/                 # Async batch jobs (submit → poll → fetch)
+├── status-adapter/               # Aggregate health fan-out (GET /v1/status)
 └── src/
     ├── App.tsx                   # shell: sidebar, top bar, guest gate, tabs
     ├── lib/                      # api client, i18n, exporters, metrics, storage

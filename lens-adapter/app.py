@@ -3,7 +3,7 @@ Google Lens adapter for the Romdoul OCR SPA.
 
 Wraps the (unofficial, free) Google Lens OCR endpoint via `chrome-lens-py` and
 exposes the SAME khparser API contract the SPA already speaks (/ocr-image,
-/parse-pdf, /parse-pdf-translated, /parse-table, /health) â€” so the frontend
+/parse-pdf, /parse-pdf-translated, /parse-table, /health) — so the frontend
 just points a new backend at it, exactly like the vLLM adapter.
 
 Lens gives us plain OCR text (with line breaks), per-word NORMALIZED geometry
@@ -20,18 +20,21 @@ from __future__ import annotations
 
 import hmac
 import io
+import json
+import logging
 import os
 import tempfile
+from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+import httpx
+from chrome_lens_py import LensAPI
+from fastapi import FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image
 
-from chrome_lens_py import LensAPI
-
-app = FastAPI(title="Google Lens â†’ khparser adapter", version="1.0.0")
+app = FastAPI(title="Google Lens → khparser adapter", version="1.0.0")
 
 ADAPTER_TOKEN = os.environ.get("ADAPTER_TOKEN", "").strip()
 # Default OCR language hint; Lens auto-detects, so 'km' (Khmer) is a safe bias.
@@ -41,7 +44,7 @@ _lens = LensAPI()
 
 
 @app.middleware("http")
-async def _require_token(request: Request, call_next):
+async def _require_token(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
     if ADAPTER_TOKEN and not exempt:
         if not hmac.compare_digest(request.headers.get("x-adapter-token", ""), ADAPTER_TOKEN):
@@ -53,7 +56,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 
 # --------------------------------------------------------------------------- #
-# Lens â†’ SPA shape helpers
+# Lens → SPA shape helpers
 # --------------------------------------------------------------------------- #
 def _rect_to_points(x0: float, y0: float, x1: float, y1: float) -> list[list[float]]:
     return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
@@ -252,7 +255,6 @@ async def _maybe_save(*, save: bool, x_api_key: str | None, filename: str, full_
         "num_pages": int(num_pages or 1),
     }
     try:
-        import httpx
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             r = await client.post(
                 METADATA_SAVE_URL,
@@ -260,8 +262,7 @@ async def _maybe_save(*, save: bool, x_api_key: str | None, filename: str, full_
                 headers={"X-API-Key": METADATA_API_KEY, "X-Adapter-Token": ADAPTER_TOKEN or ""},
             )
             r.raise_for_status()
-    except Exception:  # noqa: BLE001 â€” saving is best-effort; never fail OCR
-        import logging
+    except Exception:  # noqa: BLE001 — saving is best-effort; never fail OCR
         logging.getLogger("lens-adapter").exception("save=true capture failed")
 
 
@@ -355,9 +356,7 @@ async def parse_pdf(
     x_api_key: str | None = request.headers.get("x-api-key")
     response = await _document(files, translate=False)
     if save and response.status_code == 200:
-        body = response.body
-        import json as _json
-        doc = _json.loads(body)
+        doc = json.loads(response.body)
         await _maybe_save(save=True, x_api_key=x_api_key, filename=str(doc.get("filename") or "document"),
                           full_text=str(doc.get("full_text") or ""), result=doc,
                           num_pages=int(doc.get("num_pages") or 1))
@@ -382,7 +381,7 @@ async def parse_table(
     save: bool = Query(False),
 ) -> JSONResponse:
     """Reconstruct a multi-column grid from Lens word geometry (rows by vertical
-    proximity, columns by horizontal whitespace gaps). Best-effort â€” Lens has no
+    proximity, columns by horizontal whitespace gaps). Best-effort — Lens has no
     native table model. Falls back to a single-column line list when no columns
     are detected (e.g. prose)."""
     x_api_key: str | None = request.headers.get("x-api-key")
@@ -394,7 +393,7 @@ async def parse_table(
     w, h = res.get("_w", 0), res.get("_h", 0)
     num_rows, num_cols, cells, structured = _grid_from_words(res.get("word_data") or [], w, h)
 
-    # Fallback: no real columns â†’ one line per row (previous behavior).
+    # Fallback: no real columns → one line per row (previous behavior).
     if num_cols <= 1:
         lines = [ln for ln in (res.get("ocr_text") or "").split("\n") if ln.strip()]
         cells = [

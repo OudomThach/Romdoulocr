@@ -68,13 +68,14 @@ import asyncio
 import hmac
 import os
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -145,7 +146,7 @@ _refresh_lock = asyncio.Lock()
 _last_request: float = 0.0
 
 # Strong reference to the in-flight background refresh; see _spawn_refresh.
-_refresh_task: "asyncio.Task[None] | None" = None
+_refresh_task: asyncio.Task[None] | None = None
 
 _client: httpx.AsyncClient | None = None
 
@@ -204,7 +205,7 @@ app = FastAPI(title="Aggregate status adapter", version="1.0.0", lifespan=_lifes
 
 
 @app.middleware("http")
-async def _require_token(request: Request, call_next):
+async def _require_token(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
     if ADAPTER_TOKEN and not exempt:
         if not hmac.compare_digest(request.headers.get("x-adapter-token", ""), ADAPTER_TOKEN):
@@ -339,7 +340,7 @@ async def _probe(key: str, url: str, budget: float) -> dict[str, Any]:
 
 async def _fan_out() -> dict[str, Any]:
     results = await asyncio.gather(*(_probe(key, url, budget) for key, _, url, budget in ENGINES))
-    engines = {key: {"prefix": prefix, **res} for (key, prefix, _, _b), res in zip(ENGINES, results)}
+    engines = {key: {"prefix": prefix, **res} for (key, prefix, _, _b), res in zip(ENGINES, results, strict=True)}
 
     # "ok" requires every engine to be genuinely FAST, not merely usable. An
     # all-"warming" stack still answers `up: true` per engine (send it work), but

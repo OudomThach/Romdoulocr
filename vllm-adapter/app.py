@@ -21,16 +21,17 @@ service when the user flips the backend toggle to "vLLM" (-> /api-vllm).
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
 from preprocess import preprocess_for_surya
 
 # Base URL of the Flask vLLM OCR app. On the shared surya compose network the
@@ -57,7 +58,7 @@ ADAPTER_TOKEN = os.environ.get("ADAPTER_TOKEN", "").strip()
 
 
 @app.middleware("http")
-async def _require_token(request: Request, call_next):
+async def _require_token(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     # /health is exempt: it's non-sensitive, and the Docker healthcheck +
     # public status probes hit it without the token.
     exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
@@ -438,7 +439,7 @@ async def _maybe_save(
             )
             r.raise_for_status()
     except Exception:  # noqa: BLE001 — saving is best-effort; never fail OCR
-        logger = __import__("logging").getLogger("vllm-adapter")
+        logger = logging.getLogger("vllm-adapter")
         logger.exception("save=true capture failed")
 
 
@@ -633,7 +634,6 @@ async def parse_table(
             await _maybe_save(save=save, x_api_key=x_api_key, filename=file.filename or "table",
                               full_text=str(parsed.get("structured_text") or ""), result=parsed)
 
-        parsed = _parse_html_table(res.get("html") or "")
         if parsed is None:
             # No table on the page. Match the cloud (khparser) API, which ALWAYS
             # returns the text: fall back to the full-page text as a single-column

@@ -144,12 +144,13 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import ExitStack, asynccontextmanager, nullcontext, suppress
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Iterator
+from typing import Any
 
 import httpx
-from fastapi import FastAPI, File, Header, Query, Request, UploadFile
+from fastapi import FastAPI, File, Header, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -1011,15 +1012,13 @@ async def _process_unit(
         # only ever waits while holding capacity belonging to its OWN engine.
         # The order is still fixed for every caller, which is what keeps the
         # nesting deadlock-free.
-        async with engine_sem if engine_sem is not None else nullcontext():
-            async with _INFLIGHT:
-                async with sem:
-                    payload, failure, retryable, retry_after = await _attempt_once(
-                        client, engine, mode, params, unit
-                    )
-                    if failure is None:
-                        await asyncio.to_thread(_write_part, job_id, index, payload)
-                        return None
+        async with engine_sem if engine_sem is not None else nullcontext(), _INFLIGHT, sem:
+            payload, failure, retryable, retry_after = await _attempt_once(
+                client, engine, mode, params, unit
+            )
+            if failure is None:
+                await asyncio.to_thread(_write_part, job_id, index, payload)
+                return None
         if not retryable or attempt == MAX_ATTEMPTS:
             break
         await asyncio.sleep(
@@ -1091,7 +1090,7 @@ def _read_part(job_id: str, index: int) -> Any | None:
     failed, or the spill itself did). Callers treat None exactly like a failed
     page, which is what it is."""
     try:
-        with open(os.path.join(_parts_dir(job_id), f"{index:06d}.json"), "r", encoding="utf-8") as fh:
+        with open(os.path.join(_parts_dir(job_id), f"{index:06d}.json"), encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return None
@@ -1106,7 +1105,7 @@ def _write_json_string(out: Any, path: str) -> None:
     OCR text.
     """
     out.write('"')
-    with open(path, "r", encoding="utf-8", newline="") as fh:
+    with open(path, encoding="utf-8", newline="") as fh:
         while True:
             chunk = fh.read(1 << 16)
             if not chunk:
@@ -1121,7 +1120,7 @@ def _write_json_array(out: Any, path: str) -> None:
     the memory blow-up the spill exists to avoid."""
     out.write("[")
     first = True
-    with open(path, "r", encoding="utf-8", newline="\n") as fh:
+    with open(path, encoding="utf-8", newline="\n") as fh:
         for line in fh:
             line = line.rstrip("\n")
             if not line:
@@ -1697,7 +1696,7 @@ def _stream_partial_json(job_id: str, status: str, row: sqlite3.Row) -> Iterator
         count += 1
     yield (f'], "num_pages": {count}, "full_text": null'
            ', "note": "Pages that had finished when this was requested. Poll the job and '
-           'refetch without partial=true for the merged result."}').encode("utf-8")
+           'refetch without partial=true for the merged result."}').encode()
 
 
 # --------------------------------------------------------------------------- #
@@ -1824,7 +1823,7 @@ async def _run_job(
             outcomes = await asyncio.gather(*(run_one(i) for i in pending), return_exceptions=True)
 
         aborted = 0
-        for index, outcome in zip(pending, outcomes):
+        for index, outcome in zip(pending, outcomes, strict=True):
             if isinstance(outcome, BaseException) and failures[index] is None:
                 log.error("job %s: page %d aborted", job_id, index + 1, exc_info=outcome)
                 failures[index] = {
@@ -2041,7 +2040,7 @@ app = FastAPI(title="Async batch job service (khparser)", version="1.0.0", lifes
 
 
 @app.middleware("http")
-async def _require_token(request: Request, call_next):
+async def _require_token(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     # /health is exempt: it's non-sensitive, and the Docker healthcheck + the
     # public status probes hit it without the token.
     exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
