@@ -38,9 +38,10 @@ Named after the **romdoul** (រំដួល), Cambodia's national flower.
 - **CTC decoder on by default everywhere** — the autoregressive decoder can
   repetition-loop on noisy Khmer; CTC is forced on at the API layer and in
   every tab default (manual per-session opt-out in Settings)
-- **Dual backend at runtime** — cloud **Khmer Parsing API** (default) or a
-  local **Surya OCR 2 · vLLM** GPU stack, switchable in the header with live
-  health badges
+- **Dual backend at runtime** — local **Surya OCR 2 · vLLM** GPU stack is the
+  **default** for fresh visitors, with automatic fallback to the cloud
+  **Khmer Parsing API** when the GPU is down. Both are switchable in the header
+  with live health badges (plus Google Lens for benchmarking).
 
 ## Architecture
 

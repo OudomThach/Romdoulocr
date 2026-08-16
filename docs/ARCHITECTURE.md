@@ -101,14 +101,20 @@ sequenceDiagram
 
 ## Engine matrix
 
-| Engine | Adapter | Path | Upstream | Translation | Notes |
+| Engine | Adapter | Path | Default | Translation | Notes |
 |---|---|---|---|---|---|
-| Cloud | — (nginx direct) | `/api/*` | Modal khparser | ✅ | Default; survives home-PC offline |
-| vLLM | `vllm-adapter` | `/api-vllm/*` | Flask + vLLM GPU | ❌ | Local, free; needs GPU container up |
-| Lens | `lens-adapter` | `/api-lens/*` | Google Lens (unofficial) | ✅ | ToS caveat; benchmarking |
-| Tidy | `tidy-adapter` | `/api-tidy/*` | Gemini/Anthropic | — | 3-step prompt pipeline (profile→diagnose→code) |
-| Jobs | `jobs-adapter` | `/api-jobs/*` | all engines | — | Async submit/poll, resume on restart |
-| Status | `status-adapter` | `/v1/status` | all engines | — | Cached fan-out; `ok/degraded/down` |
+| vLLM | `vllm-adapter` | `/api-vllm/*` | **✅ default** | ❌ | Local, free; needs GPU container up; auto-fallback to cloud when down |
+| Cloud | — (nginx direct) | `/api/*` | fallback | ✅ | Fallback engine when GPU is offline |
+| Lens | `lens-adapter` | `/api-lens/*` | optional | ✅ | Google Lens (unofficial); ToS caveat; benchmarking |
+| Tidy | `tidy-adapter` | `/api-tidy/*` | — | — | 3-step prompt pipeline (profile→diagnose→code) |
+| Jobs | `jobs-adapter` | `/api-jobs/*` | — | — | Async submit/poll, resume on restart |
+| Status | `status-adapter` | `/v1/status` | — | — | Cached fan-out; `ok/degraded/down` |
+
+**Backend selection:** fresh visitors default to vLLM (`src/lib/backend.ts`);
+the health poller (`src/hooks/useHealth.ts`) auto-switches to the cloud API
+when the GPU is unreachable and back again when it recovers — the header shows
+a "GPU offline — using cloud" badge while fallback is active. The choice is
+persisted in localStorage and overridable at any time via the header toggle.
 
 ## Key design decisions (ADRs)
 

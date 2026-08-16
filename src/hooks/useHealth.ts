@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { HealthCheckResponse } from '@/types/api';
-import { baseUrlFor, VLLM_ENABLED, type BackendId } from '@/lib/backend';
+import { applyAutoFallback, baseUrlFor, preferredBackend, VLLM_ENABLED, type BackendId } from '@/lib/backend';
 
 /**
  * Probe a specific backend's /health, with a hard timeout so a slow/cold
@@ -56,9 +56,20 @@ export type BackendsHealth = Record<BackendId, UseQueryResult<HealthWithLatency>
  * dedupes by queryKey, so multiple consumers share one poll per backend.
  */
 export function useBackendsHealth(): BackendsHealth {
-  return {
+  const health = {
     default: useBackendHealth('default'),
     vllm: useBackendHealth('vllm'),
     lens: useBackendHealth('lens'),
   };
+
+  // Auto-fallback: when the preferred backend (vLLM by default) is down but
+  // the cloud engine is up, route through the cloud and let the UI flag it.
+  // Runs on every poll tick (the hook re-renders when query data changes).
+  const preferred = preferredBackend();
+  const preferredOk =
+    (health[preferred].data?.status === 'ok' && health[preferred].data?.models_loaded !== false) ?? false;
+  const cloudOk = health.default.data?.status === 'ok' ?? false;
+  applyAutoFallback(preferred, preferredOk, cloudOk);
+
+  return health;
 }

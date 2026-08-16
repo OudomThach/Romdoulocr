@@ -3,22 +3,32 @@ import { useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useBackendsHealth } from '@/hooks/useHealth';
 import { toast } from '@/hooks/useToastStore';
 import type { HealthCheckResponse } from '@/types/api';
-import { getBackend, setBackend, subscribeBackend, VLLM_ENABLED, type BackendId } from '@/lib/backend';
+import {
+  getBackend,
+  isFallbackActive,
+  setBackend,
+  subscribeBackend,
+  subscribeFallback,
+  VLLM_ENABLED,
+  type BackendId,
+} from '@/lib/backend';
 
 /**
- * Segmented control that switches the inference backend between the default
- * (Modal khparser API) and the local vLLM adapter. Persisted in localStorage
- * via src/lib/backend.ts. Switching invalidates cached queries so the health
- * badge and any in-flight results re-fetch against the newly selected backend,
- * and fires a toast so the change is acknowledged.
+ * Segmented control that switches the inference backend between the local
+ * vLLM adapter (default), the cloud Modal khparser API, and Google Lens.
+ * Persisted in localStorage via src/lib/backend.ts. Switching invalidates
+ * cached queries so the health badge and any in-flight results re-fetch
+ * against the newly selected backend, and fires a toast so the change is
+ * acknowledged.
  *
  * Each option carries a live health dot (green ready / amber degraded / red
  * offline / pulsing while checking) — both backends are probed, so you can see
- * which one is up BEFORE switching to it.
+ * which one is up BEFORE switching to it. When auto-fallback is active (GPU
+ * down, routed through the cloud), the vLLM option shows a warning badge.
  */
-const OPTIONS: { id: BackendId; label: string; title: string }[] = [
-  { id: 'default', label: 'Default', title: 'Cloud Modal API (default)' },
-  { id: 'vllm', label: 'vLLM', title: 'Local vLLM OCR backend' },
+const OPTIONS: { id: BackendId; label: string; title: string; isDefault?: boolean }[] = [
+  { id: 'vllm', label: 'Surya OCR 2', title: 'Local vLLM OCR backend (default)', isDefault: true },
+  { id: 'default', label: 'Cloud API', title: 'Cloud Modal API (fallback engine)' },
   { id: 'lens', label: 'Google Lens', title: 'Google Lens OCR (free, via the lens adapter)' },
 ];
 
@@ -30,6 +40,7 @@ function statusDot(q: UseQueryResult<HealthCheckResponse>): string {
 
 export function BackendToggle() {
   const backend = useSyncExternalStore(subscribeBackend, getBackend, () => 'default' as BackendId);
+  const fallback = useSyncExternalStore(subscribeFallback, isFallbackActive, () => false);
   const queryClient = useQueryClient();
   const health = useBackendsHealth();
 
@@ -75,9 +86,22 @@ export function BackendToggle() {
           >
             <span className={`h-1.5 w-1.5 rounded-full ${statusDot(health[opt.id])}`} />
             {opt.label}
+            {opt.isDefault && (
+              <span className={`rounded px-1 text-[9px] uppercase tracking-wide ${active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                default
+              </span>
+            )}
           </button>
         );
       })}
+      {fallback && (
+        <span
+          className="ml-1 rounded-md bg-amber-500/15 px-2 py-1 text-[10px] font-medium text-amber-700"
+          title="The local GPU is offline — requests are routed through the cloud API until it recovers."
+        >
+          GPU offline — using cloud
+        </span>
+      )}
     </div>
   );
 }
