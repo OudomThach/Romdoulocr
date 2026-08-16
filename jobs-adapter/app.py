@@ -146,7 +146,7 @@ import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import ExitStack, asynccontextmanager, nullcontext, suppress
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -670,7 +670,7 @@ class _TooLarge(Exception):
 def _iso(ts: float | None) -> str | None:
     if not ts:
         return None
-    return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.fromtimestamp(float(ts), tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _error(

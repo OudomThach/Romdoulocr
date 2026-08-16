@@ -70,7 +70,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -220,7 +220,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # Probing
 # --------------------------------------------------------------------------- #
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _degraded(key: str, detail: str, latency_ms: int) -> dict[str, Any]:
@@ -273,7 +273,7 @@ async def _probe(key: str, url: str, budget: float) -> dict[str, Any]:
             _client.get(url, headers=headers, timeout=httpx.Timeout(budget, connect=CONNECT_TIMEOUT)),
             timeout=budget + 0.5,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return _degraded(
             key, f"no response from {_host_of(url)} within {budget:.0f}s", int((time.perf_counter() - t0) * 1000)
         )

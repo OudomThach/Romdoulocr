@@ -47,12 +47,11 @@ from typing import Any
 import httpx
 import numpy as np
 import pandas as pd
+from anthropic import Anthropic
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
-from anthropic import Anthropic
 
 app = FastAPI(title="Transform-to-tidy adapter (3-step pipeline)", version="2.0.0")
 
