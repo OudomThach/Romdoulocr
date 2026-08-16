@@ -66,9 +66,8 @@ export function useBackendsHealth(): BackendsHealth {
   // the cloud engine is up, route through the cloud and let the UI flag it.
   // Runs on every poll tick (the hook re-renders when query data changes).
   const preferred = preferredBackend();
-  const preferredOk =
-    (health[preferred].data?.status === 'ok' && health[preferred].data?.models_loaded !== false) ?? false;
-  const cloudOk = health.default.data?.status === 'ok' ?? false;
+  const preferredOk = health[preferred].data?.status === 'ok' && health[preferred].data?.models_loaded !== false;
+  const cloudOk = health.default.data?.status === 'ok';
   applyAutoFallback(preferred, preferredOk, cloudOk);
 
   return health;
