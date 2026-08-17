@@ -96,7 +96,11 @@ async def _require_token(request: Request, call_next: Callable[[Request], Awaita
         supplied = request.headers.get("x-adapter-token", "")
         if not hmac.compare_digest(supplied, ADAPTER_TOKEN):
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # CORS: only relevant if a browser ever calls the adapter cross-origin. In the

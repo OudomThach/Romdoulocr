@@ -900,6 +900,78 @@ class RomdoulClient:
 
         return _merge_pages(name, results, failures)
 
+    # -- async batch jobs (jobs-adapter) ----------------------------------- #
+    def get_job_status(self, job_id: str) -> dict[str, Any]:
+        """Fetch the status and progress of an asynchronous batch job."""
+        url = f"{self.base_url}/api-jobs/jobs/{job_id}"
+        headers = {"Accept": "application/json", "User-Agent": self.user_agent}
+        if self.adapter_token:
+            headers["X-Adapter-Token"] = self.adapter_token
+        try:
+            resp = self._session().get(url, headers=headers, timeout=self.timeout)
+            if resp.ok:
+                return resp.json()
+            raise self._error(resp)
+        except requests.RequestException as exc:
+            raise RomdoulError(0, "network_error", f"{type(exc).__name__}: {exc}") from exc
+
+    def get_job_result(self, job_id: str) -> dict[str, Any]:
+        """Fetch the completed result envelope of an asynchronous batch job."""
+        url = f"{self.base_url}/api-jobs/jobs/{job_id}/result"
+        headers = {"Accept": "application/json", "User-Agent": self.user_agent}
+        if self.adapter_token:
+            headers["X-Adapter-Token"] = self.adapter_token
+        try:
+            resp = self._session().get(url, headers=headers, timeout=self.timeout)
+            if resp.ok:
+                return resp.json()
+            raise self._error(resp)
+        except requests.RequestException as exc:
+            raise RomdoulError(0, "network_error", f"{type(exc).__name__}: {exc}") from exc
+
+    def submit_job(
+        self,
+        files: Sequence[Any],
+        *,
+        engine: str | None = None,
+        mode: str = "parse-pdf",
+        concurrency: int = 4,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit one or more documents to the async batch job queue."""
+        parts: list[tuple[str, tuple[str, bytes, str]]] = []
+        for f in files:
+            name, data, ctype = _as_part(f, default_name="upload.pdf")
+            parts.append(("files", (name, data, ctype)))
+        url = f"{self.base_url}/api-jobs/jobs"
+        params = {"engine": engine or self.engine, "mode": mode, "concurrency": int(concurrency)}
+        headers = {"Accept": "application/json", "User-Agent": self.user_agent}
+        if self.adapter_token:
+            headers["X-Adapter-Token"] = self.adapter_token
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        try:
+            resp = self._session().post(url, params=params, files=parts, headers=headers, timeout=self.timeout)
+            if resp.ok:
+                return resp.json()
+            raise self._error(resp)
+        except requests.RequestException as exc:
+            raise RomdoulError(0, "network_error", f"{type(exc).__name__}: {exc}") from exc
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        """Cancel a queued or running batch job."""
+        url = f"{self.base_url}/api-jobs/jobs/{job_id}"
+        headers = {"Accept": "application/json", "User-Agent": self.user_agent}
+        if self.adapter_token:
+            headers["X-Adapter-Token"] = self.adapter_token
+        try:
+            resp = self._session().delete(url, headers=headers, timeout=self.timeout)
+            if resp.ok:
+                return resp.json()
+            raise self._error(resp)
+        except requests.RequestException as exc:
+            raise RomdoulError(0, "network_error", f"{type(exc).__name__}: {exc}") from exc
+
     # -- helpers ----------------------------------------------------------- #
     @staticmethod
     def text_of(document_result: dict[str, Any]) -> str:

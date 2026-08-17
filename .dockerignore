@@ -27,9 +27,14 @@ dist-ssr
 *~
 Thumbs.db
 
-# Logs and tsbuildinfo from local dev.
+# Logs, caches, and test artifacts from local dev.
 *.log
 *.tsbuildinfo
+.pytest_cache
+.ruff_cache
+tests
+__pycache__
+*.pyc
 
 # README/docs are fine to copy but we exclude them to keep the image tight.
 README.md

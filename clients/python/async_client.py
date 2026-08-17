@@ -35,13 +35,20 @@ class AsyncRomdoulClient:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or os.environ.get("ROMDOUL_API_KEY", "")
         limits = httpx.Limits(max_connections=max_connections, max_keepalive_connections=max_keepalive)
+        http2_enabled = False
+        try:
+            import h2  # noqa: F401
+            http2_enabled = True
+        except ImportError:
+            pass
+
         headers = {"X-API-Key": self.api_key} if self.api_key else {}
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             headers=headers,
             timeout=DEFAULT_TIMEOUT,
             limits=limits,
-            http2=True,
+            http2=http2_enabled,
         )
 
     async def __aenter__(self) -> AsyncRomdoulClient:

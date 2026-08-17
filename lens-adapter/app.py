@@ -48,7 +48,11 @@ async def _require_token(request: Request, call_next: Callable[[Request], Awaita
     exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
     if ADAPTER_TOKEN and not exempt and not hmac.compare_digest(request.headers.get("x-adapter-token", ""), ADAPTER_TOKEN):
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
