@@ -903,7 +903,7 @@ async def _attempt_once(
     # and a handle kept from the previous attempt is at EOF, which would
     # silently POST zero bytes on the retry.
     try:
-        fh = open(unit["path"], "rb")
+        fh = open(unit["path"], "rb")  # noqa: SIM115
     except OSError as exc:
         # No engine was contacted, so this deliberately records no metrics: it is
         # a local fault and counting it against the engine's failure rate would
@@ -1546,10 +1546,7 @@ def _flat_rows(job_id: str, item: dict[str, Any]) -> Iterator[dict[str, Any]]:
     # ocr-image returns {text, confidence}; parse-table returns
     # {structured_text, cells}. Neither has regions, so the entry IS the row.
     text = item.get("text") or item.get("structured_text") or ""
-    if "regions" in item:
-        region_type = "error" if error else "empty"
-    else:
-        region_type = "error" if error else "page"
+    region_type = ("error" if error else "empty") if "regions" in item else ("error" if error else "page")
     yield {
         "job_id": job_id,
         "file": file_name,
@@ -2044,10 +2041,8 @@ async def _require_token(request: Request, call_next: Callable[[Request], Awaita
     # /health is exempt: it's non-sensitive, and the Docker healthcheck + the
     # public status probes hit it without the token.
     exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
-    if ADAPTER_TOKEN and not exempt:
-        # Constant-time compare to avoid leaking the token via timing.
-        if not hmac.compare_digest(request.headers.get("x-adapter-token", ""), ADAPTER_TOKEN):
-            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    if ADAPTER_TOKEN and not exempt and not hmac.compare_digest(request.headers.get("x-adapter-token", ""), ADAPTER_TOKEN):
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
     return await call_next(request)
 
 

@@ -115,6 +115,7 @@ def _build_handler(webui_dir: str, funnel_base: str, backend: str):
         # ---- desktop-only: 'Check for updates' from the main interface -------
         def _check_update(self):
             import json as _json
+
             import version as _version
             try:
                 import updater as _updater
@@ -197,7 +198,7 @@ def _build_handler(webui_dir: str, funnel_base: str, backend: str):
             self.wfile.write(data)
 
         def _serve_index(self, full: str):
-            with open(full, "r", encoding="utf-8") as fh:
+            with open(full, encoding="utf-8") as fh:
                 html = fh.read()
             html = html.replace("<head>", "<head>" + _seed_script(backend), 1)
             data = html.encode("utf-8")

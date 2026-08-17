@@ -11,8 +11,9 @@ This script simulates how Apache Airflow executes a daily Khmer document ETL pip
 
 import json
 import logging
-import sys
 from datetime import datetime, timezone
+
+UTC = timezone.utc
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -34,7 +35,7 @@ except ImportError:
 def run_simulated_airflow_dag():
     logger.info("==========================================================")
     logger.info("🚀 AIRFLOW DAG SIMULATION: 'daily_khmer_document_etl'")
-    logger.info("📅 Execution Date: %s", datetime.now(timezone.utc).isoformat())
+    logger.info("📅 Execution Date: %s", datetime.now(UTC).isoformat())
     logger.info("==========================================================")
 
     # Simulated OCR extraction output
@@ -75,7 +76,7 @@ def run_simulated_airflow_dag():
             output_path=str(output_json_path),
         )
 
-        context = {"execution_date": datetime.now(timezone.utc), "task_instance": MagicMock()}
+        context = {"execution_date": datetime.now(UTC), "task_instance": MagicMock()}
         result = operator.execute(context)
 
         logger.info("✅ Task 1 Success! Extracted %d characters.", len(result["full_text"]))
@@ -93,8 +94,9 @@ def run_simulated_airflow_dag():
         # Task 3: Downstream Data Lake validation
         logger.info("\n--- [TASK 3: data_lake_sink_validation] ---")
         assert output_json_path.exists(), "Output file was not created!"
-        with open(output_json_path, "r", encoding="utf-8") as f:
+        with open(output_json_path, encoding="utf-8") as f:
             saved_data = json.load(f)
+            assert "full_text" in saved_data or "text" in saved_data, "Output missing text payload"
         logger.info("✅ Verified Data Lake artifact: %s (Size: %d bytes)", output_json_path.name, output_json_path.stat().st_size)
 
         # Clean up test output

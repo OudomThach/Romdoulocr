@@ -8,8 +8,8 @@ controller can re-register the global hotkey immediately.
 from __future__ import annotations
 
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import filedialog, messagebox, ttk
-from typing import Callable
 
 import config as cfg_mod
 import dpi

@@ -207,9 +207,8 @@ app = FastAPI(title="Aggregate status adapter", version="1.0.0", lifespan=_lifes
 @app.middleware("http")
 async def _require_token(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     exempt = request.method == "OPTIONS" or request.url.path.rstrip("/") == "/health"
-    if ADAPTER_TOKEN and not exempt:
-        if not hmac.compare_digest(request.headers.get("x-adapter-token", ""), ADAPTER_TOKEN):
-            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    if ADAPTER_TOKEN and not exempt and not hmac.compare_digest(request.headers.get("x-adapter-token", ""), ADAPTER_TOKEN):
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
     return await call_next(request)
 
 

@@ -61,7 +61,7 @@ class Config:
 def load() -> Config:
     try:
         # utf-8-sig tolerates a BOM (e.g. a config hand-edited in Notepad/PowerShell).
-        with open(_config_path(), "r", encoding="utf-8-sig") as fh:
+        with open(_config_path(), encoding="utf-8-sig") as fh:
             data = json.load(fh)
         cfg = Config()
         for k, v in data.items():

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import List, TypedDict
+from typing import TypedDict
 
 
 class Item(TypedDict):
@@ -47,15 +47,15 @@ def as_json(text: str, backend: str = "", source: str = "") -> str:
 
 
 # ---- batch ---------------------------------------------------------------- #
-def batch_plain(items: List[Item]) -> str:
+def batch_plain(items: list[Item]) -> str:
     return "\n\n".join(f"── {it['name']} ──\n{it['text']}" for it in items)
 
 
-def batch_markdown(items: List[Item]) -> str:
+def batch_markdown(items: list[Item]) -> str:
     return "\n\n".join(f"## {it['name']}\n\n{it['text']}" for it in items)
 
 
-def batch_json(items: List[Item], backend: str = "") -> str:
+def batch_json(items: list[Item], backend: str = "") -> str:
     return json.dumps(
         {
             "backend": backend,

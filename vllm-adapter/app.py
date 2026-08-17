@@ -670,33 +670,33 @@ async def parse_table(
     # text (the structure-only table_rec model returns EMPTY cell text, so we
     # don't use it here).
     res = await _process(client, up["file_path"], 0, "full_page", dpi)
-        parsed = _parse_html_table(res.get("html") or "")
-        if parsed is not None and save:
-            # Table results carry their content in structured_text, not text —
-            # send that so capture-ocr generates markdown/csv from the grid.
-            await _maybe_save(save=save, x_api_key=x_api_key, filename=file.filename or "table",
-                              full_text=str(parsed.get("structured_text") or ""), result=parsed)
+    parsed = _parse_html_table(res.get("html") or "")
+    if parsed is not None and save:
+        # Table results carry their content in structured_text, not text —
+        # send that so capture-ocr generates markdown/csv from the grid.
+        await _maybe_save(save=save, x_api_key=x_api_key, filename=file.filename or "table",
+                          full_text=str(parsed.get("structured_text") or ""), result=parsed)
 
-        if parsed is None:
-            # No table on the page. Match the cloud (khparser) API, which ALWAYS
-            # returns the text: fall back to the full-page text as a single-column
-            # grid (one row per line) instead of an empty 0×0 "no table" result,
-            # so Table mode still yields content on prose pages.
-            full_text = res.get("text") or ""
-            lines = [ln.rstrip() for ln in full_text.split("\n")]
-            while lines and not lines[-1].strip():
-                lines.pop()
-            zero_bbox = {"points": _rect_to_points([0.0, 0.0, 0.0, 0.0]), "confidence": 1.0}
-            cells = [
-                {"row": i, "col": 0, "text": ln, "bbox": zero_bbox, "confidence": 1.0}
-                for i, ln in enumerate(lines)
-            ]
-            parsed = {
-                "cells": cells,
-                "num_rows": len(cells),
-                "num_cols": 1 if cells else 0,
-                "structured_text": full_text,
-            }
+    if parsed is None:
+        # No table on the page. Match the cloud (khparser) API, which ALWAYS
+        # returns the text: fall back to the full-page text as a single-column
+        # grid (one row per line) instead of an empty 0×0 "no table" result,
+        # so Table mode still yields content on prose pages.
+        full_text = res.get("text") or ""
+        lines = [ln.rstrip() for ln in full_text.split("\n")]
+        while lines and not lines[-1].strip():
+            lines.pop()
+        zero_bbox = {"points": _rect_to_points([0.0, 0.0, 0.0, 0.0]), "confidence": 1.0}
+        cells = [
+            {"row": i, "col": 0, "text": ln, "bbox": zero_bbox, "confidence": 1.0}
+            for i, ln in enumerate(lines)
+        ]
+        parsed = {
+            "cells": cells,
+            "num_rows": len(cells),
+            "num_cols": 1 if cells else 0,
+            "structured_text": full_text,
+        }
 
     return JSONResponse(
         {

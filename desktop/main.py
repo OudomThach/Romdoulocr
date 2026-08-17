@@ -254,8 +254,8 @@ def main() -> None:
             res = updater.check(version.VERSION)
 
             def show():
-                from tkinter import messagebox
                 import webbrowser
+                from tkinter import messagebox
                 parent = gui.root
                 if res["status"] == "update":
                     if messagebox.askyesno(

@@ -12,14 +12,13 @@ from __future__ import annotations
 import io
 import os
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import filedialog
-from typing import Callable
-
-import mss
-from PIL import Image, ImageTk
 
 import dpi
 import formats
+import mss
+from PIL import Image, ImageTk
 
 ACCENT = "#00e5ff"
 INK = "#0b1220"
@@ -133,7 +132,7 @@ def open_overlay(root: tk.Tk, on_result: Callable[[bytes | None], None]) -> None
         t = dpi.px(14)
         segs = [(a, b, a + t, b), (a, b, a, b + t), (c, b, c - t, b), (c, b, c, b + t),
                 (a, d, a + t, d), (a, d, a, d - t), (c, d, c - t, d), (c, d, c, d - t)]
-        for line, (x0, y0, x1_, y1_) in zip(ticks, segs):
+        for line, (x0, y0, x1_, y1_) in zip(ticks, segs, strict=False):
             canvas.coords(line, x0, y0, x1_, y1_)
             canvas.itemconfig(line, state="normal")
         # size chip above the selection (or below if near the top)

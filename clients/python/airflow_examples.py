@@ -16,7 +16,6 @@ import os
 from datetime import datetime, timedelta
 
 from airflow.decorators import dag, task
-
 from metadata import MetadataClient
 from romdoul import RomdoulClient
 

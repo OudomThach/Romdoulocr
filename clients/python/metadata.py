@@ -25,11 +25,8 @@ What it covers:
 
 from __future__ import annotations
 
-import csv
-import io
-import json
 import time
-from typing import Any
+from typing import Any, NoReturn
 
 import requests
 
@@ -41,7 +38,7 @@ class MetadataError(Exception):
         super().__init__(f"[{status}] {message}")
 
 
-def _bail(status: int, body: dict, msg: str | None = None) -> Never:
+def _bail(status: int, body: dict, msg: str | None = None) -> NoReturn:
     err_body = (body or {}).get("error") or {}
     raise MetadataError(status, err_body.get("message") or msg or body.get("detail") or f"HTTP {status}", body)
 
@@ -90,12 +87,16 @@ class MetadataClient:
         params: dict | None = None,
         stream: bool = False,
         timeout: int = 30,
+        extra_headers: dict | None = None,
     ) -> requests.Response:
         url = f"{self.base_url}/api/v1{path}"
+        headers = self._headers()
+        if extra_headers:
+            headers.update(extra_headers)
         kwargs: dict = dict(
             method=method,
             url=url,
-            headers=self._headers(),
+            headers=headers,
             timeout=timeout,
             stream=stream,
         )
@@ -131,8 +132,8 @@ class MetadataClient:
     def _post(self, path: str, body: dict) -> Any:
         return self._request("POST", path, body=body).json()
 
-    def _patch(self, path: str, body: dict) -> Any:
-        return self._request("PATCH", path, body=body).json()
+    def _patch(self, path: str, body: dict, headers: dict | None = None) -> Any:
+        return self._request("PATCH", path, body=body, extra_headers=headers).json()
 
     def _delete(self, path: str) -> None:
         self._request("DELETE", path)
@@ -200,8 +201,8 @@ class MetadataClient:
             body["business"] = business
         if status is not None:
             body["status"] = status
-        headers = {"X-Edited-By": edited_by} if edited_by else {}
-        return self._patch(f"/records/{record_id}", body)
+        headers = {"X-Edited-By": edited_by} if edited_by else None
+        return self._patch(f"/records/{record_id}", body, headers=headers)
 
     def delete_record(self, record_id: str) -> None:
         """Delete a record (admin only)."""
@@ -391,10 +392,12 @@ class AsyncMetadataClient:
         return resp
 
     async def health(self) -> dict:
+        import aiohttp
         async with self._session.get(f"{self.base_url}/health", timeout=aiohttp.ClientTimeout(10)) as resp:
             return await resp.json()
 
-    async def stats(self) -> dict: return await self._request("GET", "/stats")
+    async def stats(self) -> dict:
+        return await self._request("GET", "/stats")
 
     async def list_records(self, **filters: Any) -> dict:
         return await self._request("GET", "/records", params={k: v for k, v in filters.items() if v is not None})
@@ -405,11 +408,21 @@ class AsyncMetadataClient:
     async def create_record(self, payload: dict) -> dict:
         return await self._request("POST", "/records", body=payload)
 
-    async def patch_record(self, record_id: str, *, data: dict | None = None, business: dict | None = None, status: str | None = None) -> dict:
+    async def patch_record(
+        self,
+        record_id: str,
+        *,
+        data: dict | None = None,
+        business: dict | None = None,
+        status: str | None = None,
+    ) -> dict:
         body: dict = {}
-        if data is not None: body["data"] = data
-        if business is not None: body["business"] = business
-        if status is not None: body["status"] = status
+        if data is not None:
+            body["data"] = data
+        if business is not None:
+            body["business"] = business
+        if status is not None:
+            body["status"] = status
         return await self._request("PATCH", f"/records/{record_id}", body=body)
 
     async def delete_record(self, record_id: str) -> None:

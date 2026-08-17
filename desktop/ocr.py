@@ -50,7 +50,7 @@ def _pick_text(data: Any) -> str:
     regions = data.get("regions")
     if isinstance(regions, list):
         lines = [(r or {}).get("text", "").strip() for r in regions]
-        lines = [l for l in lines if l]
+        lines = [ln for ln in lines if ln]
         if lines:
             return "\n".join(lines)
     return ""

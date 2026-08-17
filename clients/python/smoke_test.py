@@ -35,10 +35,16 @@ import sys
 import time
 import uuid
 
-import requests
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
-from romdoul import RomdoulClient, RomdoulError
+import requests
 from metadata import MetadataClient, MetadataError
+from romdoul import RomdoulClient, RomdoulError
 
 BASE = os.environ.get("ROMDOUL_BASE_URL", "https://romdoulocr.netlify.app").rstrip("/")
 META_BASE = os.environ.get("ROMDOUL_META_URL", f"{BASE}/api-meta").rstrip("/")
@@ -395,7 +401,7 @@ def main() -> int:
     passed = [r for r in results if r[1] == PASS]
     skipped = [r for r in results if r[1] == SKIP]
     print(f"PASS {len(passed)} · FAIL {len(failed)} · SKIP {len(skipped)}")
-    for _, status, name in failed:
+    for _, _status, name in failed:
         print(f"  FAILED: {name}")
     return 1 if failed else 0
 

@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 try:
     from airflow.exceptions import AirflowException
+    from airflow.hooks.base import BaseHook
     from airflow.models import BaseOperator
     from airflow.sensors.base import BaseSensorOperator
-    from airflow.hooks.base import BaseHook
 except ImportError:
     class AirflowException(Exception):  # type: ignore
         pass
@@ -35,8 +36,8 @@ except ImportError:
     class BaseHook:  # type: ignore
         pass
 
-from romdoul import RomdoulClient
 from metadata import MetadataClient
+from romdoul import RomdoulClient
 
 log = logging.getLogger("airflow.providers.romdoul")
 

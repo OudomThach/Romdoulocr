@@ -13,7 +13,6 @@ the zipped `out/RomdoulOCR` folder as an asset.
 from __future__ import annotations
 
 import requests
-
 import version
 
 

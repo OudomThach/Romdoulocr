@@ -55,9 +55,10 @@ import time
 import uuid
 import warnings
 import weakref
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.utils import parsedate_to_datetime
-from typing import Any, Callable, Iterable, Iterator, Sequence
+from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -245,7 +246,7 @@ def _derive_idempotency_key(prefix: str, path: str, params: dict[str, Any], part
     h = hashlib.sha256()
     h.update(prefix.encode("utf-8") + b"\0" + path.encode("utf-8") + b"\0")
     for key in sorted(params):
-        h.update(f"{key}={params[key]}\0".encode("utf-8"))
+        h.update(f"{key}={params[key]}\0".encode())
     for field, (name, data, _ctype) in parts:
         h.update(field.encode("utf-8") + b"\0" + name.encode("utf-8") + b"\0")
         h.update(hashlib.sha256(data).digest())

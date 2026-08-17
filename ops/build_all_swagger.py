@@ -86,7 +86,8 @@ def add_handwritten_status(merged: dict) -> None:
 
 
 def main() -> int:
-    base = json.load(open(OUT, encoding="utf-8"))  # the hand-curated OCR spec
+    with open(OUT, encoding="utf-8") as f:
+        base = json.load(f)  # the hand-curated OCR spec
 
     jobs = fetch(JOBS_SPEC)
     tidy = fetch(TIDY_SPEC)

@@ -16,13 +16,13 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
-from typing import Callable
+from collections.abc import Callable
 
 
 class Gui:
     def __init__(self) -> None:
         self.root: tk.Tk | None = None
-        self._q: "queue.Queue[Callable[[], None]]" = queue.Queue()
+        self._q: queue.Queue[Callable[[], None]] = queue.Queue()
         self._ready = threading.Event()
 
     def start(self) -> None:

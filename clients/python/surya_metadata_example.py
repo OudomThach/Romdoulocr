@@ -25,8 +25,15 @@ import os
 import sys
 import uuid
 
-from romdoul import RomdoulClient
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from metadata import MetadataClient
+from romdoul import RomdoulClient
 
 BASE = os.environ.get("ROMDOUL_BASE_URL", "https://romdoulocr.netlify.app").rstrip("/")
 META_BASE = os.environ.get("ROMDOUL_META_URL", f"{BASE}/api-meta").rstrip("/")
@@ -60,7 +67,7 @@ def main() -> int:
         img.save(path)
         print(f"  wrote {path}")
 
-    print(f"Surya OCR 2 (vLLM) + metadata example")
+    print("Surya OCR 2 (vLLM) + metadata example")
     print(f"  engine: {ENGINE}   base: {BASE}   file: {path}")
 
     # -- 1. health --------------------------------------------------------- #
@@ -125,7 +132,7 @@ def main() -> int:
     step(6, "Verify + export")
     got = m.get_record(rid)
     print(f"  GET /records/{rid}: status={got.get('status')}, "
-          f"full_text={len(((got.get('data') or {}).get('full_text') or ''))} chars")
+          f"full_text={len((got.get('data') or {}).get('full_text') or '')} chars")
     hist = m.record_history(rid)
     print(f"  history: {len(hist)} events ({', '.join(e['action'] for e in hist)})")
 

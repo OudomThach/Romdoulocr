@@ -13,6 +13,7 @@ Checks:
 import sys
 import time
 from pathlib import Path
+
 import httpx
 
 # Ensure UTF-8 output on Windows terminal
@@ -67,7 +68,7 @@ def test_live_docker_stack():
         print(f"   ❌ vLLM adapter error: {e}")
 
     # 5. Live OCR Extraction on real image
-    print(f"\n5️⃣  Running Live OCR Extraction on real sample image via local vLLM GPU stack...")
+    print("\n5️⃣  Running Live OCR Extraction on real sample image via local vLLM GPU stack...")
     print(f"   Sample path: {SAMPLE_IMG}")
     if not SAMPLE_IMG.exists():
         print(f"   ❌ Sample file not found: {SAMPLE_IMG}")

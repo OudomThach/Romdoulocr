@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import httpx
 
@@ -76,7 +77,7 @@ class AsyncRomdoulClient:
                 resp = await self.client.post(endpoint, files=files)
                 resp.raise_for_status()
                 return resp.json()
-            except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+            except (httpx.HTTPStatusError, httpx.TransportError):
                 if attempt == max_retries:
                     raise
                 await asyncio.sleep(0.5 * (2 ** (attempt - 1)))

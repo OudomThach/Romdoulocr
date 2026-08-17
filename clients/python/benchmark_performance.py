@@ -11,6 +11,7 @@ import asyncio
 import sys
 import time
 from pathlib import Path
+
 import httpx
 
 if sys.platform == "win32":

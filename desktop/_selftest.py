@@ -2,6 +2,7 @@
 and API reverse-proxy. Points the proxy at the local nginx (127.0.0.1:8181) so it
 doesn't depend on the Funnel being reachable."""
 import re
+
 import requests
 import server
 
@@ -28,7 +29,8 @@ if m:
     print("GET", m.group(0), "->", a.status_code, a.headers.get("Content-Type"))
     ok &= a.status_code == 200 and "javascript" in (a.headers.get("Content-Type", ""))
 else:
-    print("!! no asset found in index.html"); ok = False
+    print("!! no asset found in index.html")
+    ok = False
 
 # 3) API reverse-proxy -> lens adapter health
 try:
@@ -36,7 +38,8 @@ try:
     print("GET /api-lens/health ->", h.status_code, "|", h.text[:80])
     ok &= h.status_code == 200
 except Exception as e:
-    print("!! proxy failed:", e); ok = False
+    print("!! proxy failed:", e)
+    ok = False
 
 # 4) SPA fallback (unknown route -> index.html)
 f = requests.get(url.rstrip("/") + "/history", timeout=10)
