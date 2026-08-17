@@ -11,9 +11,13 @@ This script simulates how Apache Airflow executes a daily Khmer document ETL pip
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
-UTC = timezone.utc
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+    UTC = timezone.utc  # noqa: UP017
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
